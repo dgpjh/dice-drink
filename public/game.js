@@ -386,9 +386,14 @@ document.getElementById('btn-copy-code').addEventListener('click', () => {
 
 // 复制邀请链接
 document.getElementById('btn-copy-link').addEventListener('click', () => {
-  const link = `${location.origin}/room/${state.roomCode}`;
+  // 确保链接包含完整的协议、主机名和端口
+  const protocol = location.protocol;
+  const host = location.hostname;
+  const port = location.port;
+  const portPart = port ? `:${port}` : '';
+  const link = `${protocol}//${host}${portPart}/room/${state.roomCode}`;
   copyToClipboard(link);
-  showToast('邀请链接已复制', 'success');
+  showToast('邀请链接已复制：' + link, 'success');
 });
 
 document.getElementById('btn-leave-waiting').addEventListener('click', () => {
@@ -620,15 +625,17 @@ function getMinQuantity(value, mode, lastBid) {
       ruleMin = prev.quantity + 1;
     }
   } else if (prev.mode === 'zhai' && nextMode === 'fly') {
-    // 斋→飞：数量至少+2
-    ruleMin = prev.quantity + 2;
-  } else if (prev.mode === 'fly' && nextMode === 'zhai') {
-    // 飞→斋：数量至少-1（但不低于baseMin）
+    // 斋→飞：跨模式只需满足数量或点数其中一个条件
+    // 最低数量：如果点数更大，可以同数量；否则需要数量+1
     if (isValueGreater(value, prev.value)) {
-      ruleMin = prev.quantity - 1;
-    } else {
       ruleMin = prev.quantity;
+    } else {
+      ruleMin = prev.quantity + 1;
     }
+  } else if (prev.mode === 'fly' && nextMode === 'zhai') {
+    // 飞→斋：跨模式切换，允许数量减少
+    // 最低就是 baseMin（基础最低值）
+    ruleMin = baseMin;
   } else {
     ruleMin = baseMin;
   }
@@ -703,10 +710,14 @@ function isBidValid(quantity, value, mode, lastBid) {
     return false;
   }
   if (prev.mode === 'zhai' && testMode === 'fly') {
-    return quantity >= prev.quantity + 2;
+    // 斋→飞：数量更大，或同数量点数更大
+    if (quantity > prev.quantity) return true;
+    if (quantity === prev.quantity && isValueGreater(value, prev.value)) return true;
+    return false;
   }
   if (prev.mode === 'fly' && testMode === 'zhai') {
-    return quantity >= prev.quantity - 1 && quantity >= baseMin;
+    // 飞→斋：允许数量减少，只要不低于基础最低值就行
+    return quantity >= baseMin;
   }
   return false;
 }
@@ -978,12 +989,28 @@ function showSettlementPage(data) {
     const modeName = data.lastBid.mode === 'fly' ? '飞' : '斋';
     const modeClass = data.lastBid.mode === 'fly' ? 'mode-tag-fly' : 'mode-tag-zhai';
     const modeTag = data.lastBid.value === 1 ? '' : `<span class="${modeClass}">${modeName}</span>`;
+    
+    // 构建每位玩家的贡献详情
+    let countDetailsHtml = '';
+    if (data.countDetails) {
+      for (const [pid, count] of Object.entries(data.countDetails)) {
+        const name = pid === state.playerId ? state.nickname + '（你）' : (state.opponent?.nickname || '对手');
+        countDetailsHtml += `
+          <div class="detail-row">
+            <span class="detail-label">${name}</span>
+            <span class="detail-value">贡献 ${count} 个 ${data.lastBid.value}</span>
+          </div>
+        `;
+      }
+    }
+    
     detailsEl.innerHTML = `
       <div class="detail-row">
-        <span class="detail-label">最后叫数</span>
+        <span class="detail-label">最后叫骰</span>
         <span class="detail-value">${data.lastBid.quantity}个${data.lastBid.value} ${modeTag}</span>
       </div>
       ${data.multiplier > 1 ? `<div class="detail-row"><span class="detail-label">劈骰倍数</span><span class="detail-value">×${data.multiplier}</span></div>` : ''}
+      ${countDetailsHtml}
       <div class="detail-row">
         <span class="detail-label">实际总数</span>
         <span class="detail-value">${data.totalCount} 个 ${data.lastBid.value}</span>
