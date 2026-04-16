@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>🎲 大话骰 - 双人在线对战</title>
+  <!-- Open Graph -->
+  <meta property="og:title" content="🎲 大话骰 - 来战！">
+  <meta property="og:description" content="邀请你来一局大话骰，点击加入！">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎲</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 首页 -->
+    <div id="page-home" class="page active">
+      <div class="home-container">
+        <div class="logo-area">
+          <div class="dice-icon">🎲</div>
+          <h1 class="game-title">大话骰</h1>
+          <p class="subtitle">双人在线对战</p>
+        </div>
+        <div class="menu-buttons">
+          <button class="btn btn-primary btn-lg" id="btn-create-room">
+            <span class="btn-icon">🏠</span>
+            创建房间
+          </button>
+          <button class="btn btn-secondary btn-lg" id="btn-join-room">
+            <span class="btn-icon">🚪</span>
+            加入房间
+          </button>
+          <button class="btn btn-ghost btn-lg" id="btn-rules">
+            <span class="btn-icon">📖</span>
+            游戏规则
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 昵称设置弹窗 -->
+    <div id="modal-nickname" class="modal">
+      <div class="modal-content">
+        <h2>设置昵称</h2>
+        <input type="text" id="input-nickname" class="input" placeholder="输入昵称（留空随机生成）" maxlength="8">
+        <div id="nickname-action-area">
+          <!-- 动态内容 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 加入房间弹窗 -->
+    <div id="modal-join" class="modal">
+      <div class="modal-content">
+        <h2>加入房间</h2>
+        <input type="text" id="input-room-code" class="input" placeholder="输入6位房间码" maxlength="6" style="text-transform:uppercase;">
+        <button class="btn btn-primary" id="btn-confirm-join">加入</button>
+        <button class="btn btn-ghost" id="btn-cancel-join">取消</button>
+      </div>
+    </div>
+
+    <!-- 等待房间 -->
+    <div id="page-waiting" class="page">
+      <div class="waiting-container">
+        <h2>等待对手加入...</h2>
+        <div class="room-code-display">
+          <span class="label">房间码</span>
+          <div class="code-digits" id="room-code-digits"></div>
+        </div>
+        <div class="share-buttons">
+          <button class="btn btn-sm btn-secondary" id="btn-copy-code">📋 复制房间码</button>
+          <button class="btn btn-sm btn-primary" id="btn-copy-link">🔗 复制邀请链接</button>
+        </div>
+        <div class="player-list">
+          <div class="player-item you">
+            <span class="player-status">✅</span>
+            <span class="player-name" id="waiting-player1">你</span>
+          </div>
+          <div class="player-item opponent">
+            <span class="player-status">⏳</span>
+            <span class="player-name" id="waiting-player2">等待中...</span>
+          </div>
+        </div>
+        <div class="room-timer" id="room-timer">房间将在 <span id="room-countdown">10:00</span> 后关闭</div>
+        <button class="btn btn-ghost" id="btn-leave-waiting">退出房间</button>
+      </div>
+    </div>
+
+    <!-- 规则简介弹窗 -->
+    <div id="modal-rules-quick" class="modal">
+      <div class="modal-content rules-quick-modal">
+        <h2>📖 规则速查</h2>
+        <div class="rules-quick-list">
+          <div class="rule-item"><span class="rule-icon">🎯</span><span class="rule-text"><strong>单骰</strong>（5颗全不同）→ 骰子算 <em>0</em></span></div>
+          <div class="rule-item"><span class="rule-icon">🐆</span><span class="rule-text"><strong>豹子</strong>（含1凑5同）→ 该点数算 <em>6</em> 个</span></div>
+          <div class="rule-item"><span class="rule-icon">👑</span><span class="rule-text"><strong>纯豹</strong>（5颗全同）→ 该点数算 <em>7</em> 个</span></div>
+          <div class="rule-item"><span class="rule-icon">🔄</span><span class="rule-text"><strong>斋→飞</strong> 数量 <em>+2</em>，<strong>飞→斋</strong> 数量 <em>-1</em></span></div>
+          <div class="rule-item"><span class="rule-icon">⚡</span><span class="rule-text"><strong>劈骰</strong> 倍数翻倍，<strong>认输</strong> 喝一半</span></div>
+        </div>
+        <button class="btn btn-primary" id="btn-close-rules-quick">知道了</button>
+      </div>
+    </div>
+
+    <!-- 对局主界面 -->
+    <div id="page-game" class="page">
+      <div class="game-container">
+        <!-- 规则吸边按钮 -->
+        <button class="rules-float-btn" id="btn-rules-float" title="规则速查">📖</button>
+
+        <!-- 对手区域 -->
+        <div class="opponent-area">
+          <div class="player-header">
+            <span class="player-name" id="game-opponent-name">对手</span>
+            <span class="player-score" id="game-opponent-score">得分：0</span>
+          </div>
+          <div class="dice-row opponent-dice" id="opponent-dice">
+            <div class="die hidden">?</div>
+            <div class="die hidden">?</div>
+            <div class="die hidden">?</div>
+            <div class="die hidden">?</div>
+            <div class="die hidden">?</div>
+          </div>
+        </div>
+
+        <!-- 叫骰记录区 -->
+        <div class="bid-history" id="bid-history">
+          <div class="bid-history-title">叫骰记录</div>
+          <div class="bid-list" id="bid-list">
+            <!-- 动态填充 -->
+          </div>
+          <div class="turn-indicator" id="turn-indicator"></div>
+        </div>
+
+        <!-- 己方区域 -->
+        <div class="my-area">
+          <div class="player-header">
+            <span class="player-name" id="game-my-name">你</span>
+            <span class="player-score" id="game-my-score">得分：0</span>
+          </div>
+          <div class="dice-row my-dice" id="my-dice">
+            <!-- 动态填充 -->
+          </div>
+        </div>
+
+        <!-- 操作区 - 叫数 -->
+        <div class="action-area" id="action-bidding">
+          <div class="bid-controls">
+            <div class="bid-selectors">
+              <div class="selector-group">
+                <label>数量</label>
+                <div class="number-selector" id="quantity-selector">
+                  <button class="sel-btn" data-dir="down">−</button>
+                  <span class="sel-value" id="quantity-value">1</span>
+                  <button class="sel-btn" data-dir="up">+</button>
+                </div>
+              </div>
+              <div class="selector-sep">个</div>
+              <div class="selector-group">
+                <label>点数</label>
+                <div class="dice-value-selector" id="value-selector">
+                  <button class="dice-val-btn" data-val="1">1</button>
+                  <button class="dice-val-btn active" data-val="2">2</button>
+                  <button class="dice-val-btn" data-val="3">3</button>
+                  <button class="dice-val-btn" data-val="4">4</button>
+                  <button class="dice-val-btn" data-val="5">5</button>
+                  <button class="dice-val-btn" data-val="6">6</button>
+                </div>
+              </div>
+              <div class="selector-group">
+                <div class="mode-toggle" id="mode-toggle">
+                  <button class="mode-btn mode-fly active" data-mode="fly">飞</button>
+                  <button class="mode-btn mode-zhai" data-mode="zhai">斋</button>
+                </div>
+              </div>
+            </div>
+            <div class="bid-buttons">
+              <button class="btn btn-primary btn-bid-action" id="btn-bid">叫骰</button>
+              <button class="btn btn-danger btn-open-action" id="btn-open" disabled>开！</button>
+              <button class="btn btn-warning btn-challenge-action" id="btn-challenge" disabled>劈！</button>
+            </div>
+          </div>
+          <div class="timer-bar" id="timer-bar">
+            <div class="timer-fill" id="timer-fill"></div>
+            <span class="timer-text" id="timer-text">⏱ 30秒</span>
+          </div>
+        </div>
+
+        <!-- 操作区 - 被劈 -->
+        <div class="action-area" id="action-challenged" style="display:none;">
+          <div class="challenge-info">
+            <span class="challenge-icon">⚡</span>
+            <span class="challenge-text" id="challenge-text">你被劈了！当前倍数：×2</span>
+          </div>
+          <div class="bid-buttons">
+            <button class="btn btn-danger" id="btn-challenge-open">开骰</button>
+            <button class="btn btn-warning" id="btn-counter-challenge">反劈！</button>
+            <button class="btn btn-ghost" id="btn-surrender">认输</button>
+          </div>
+          <div class="timer-bar" id="timer-bar-challenge">
+            <div class="timer-fill" id="timer-fill-challenge"></div>
+            <span class="timer-text" id="timer-text-challenge">⏱ 30秒</span>
+          </div>
+        </div>
+
+        <!-- 等待对方操作 -->
+        <div class="action-area" id="action-waiting" style="display:none;">
+          <div class="waiting-text">等待对方操作...</div>
+          <div class="timer-bar" id="timer-bar-waiting">
+            <div class="timer-fill" id="timer-fill-waiting"></div>
+            <span class="timer-text" id="timer-text-waiting">⏱ 30秒</span>
+          </div>
+        </div>
+
+        <!-- 聊天输入栏 -->
+        <div class="chat-bar">
+          <input type="text" id="chat-input" class="chat-input" placeholder="发送弹幕..." maxlength="30">
+          <button class="btn btn-sm btn-primary chat-send-btn" id="btn-chat-send">发送</button>
+        </div>
+
+        <!-- 弹幕容器 -->
+        <div class="danmaku-container" id="danmaku-container"></div>
+      </div>
+    </div>
+
+    <!-- 结算页面 -->
+    <div id="page-settlement" class="page">
+      <div class="settlement-container">
+        <h2 class="settlement-title" id="settlement-title">开骰！</h2>
+
+        <div class="settlement-dice-area" id="settlement-dice-area">
+          <!-- 动态填充双方骰子 -->
+        </div>
+
+        <div class="settlement-details" id="settlement-details">
+          <!-- 动态填充结算详情 -->
+        </div>
+
+        <div class="settlement-result" id="settlement-result">
+          <!-- 胜负结果 -->
+        </div>
+
+        <div class="settlement-stats" id="settlement-stats">
+          <!-- 战绩统计 -->
+        </div>
+
+        <div class="settlement-buttons">
+          <button class="btn btn-primary btn-lg" id="btn-play-again">再来一局</button>
+          <button class="btn btn-ghost" id="btn-leave-game">退出房间</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 规则页面 -->
+    <div id="page-rules" class="page">
+      <div class="rules-container">
+        <h2>🎲 游戏规则</h2>
+        <div class="rules-content">
+          <h3>基本玩法</h3>
+          <p>两位玩家各摇5颗骰子，只能看到自己的骰子。轮流"叫数"猜测场上所有骰子中某个点数的总数。</p>
+          
+          <h3>叫数格式</h3>
+          <p><strong>"X个Y [飞/斋]"</strong></p>
+          <ul>
+            <li><strong>飞（默认）</strong>：1点当万能，加入统计</li>
+            <li><strong>斋</strong>：1不算万能，只统计纯点数</li>
+            <li><strong>叫1点</strong>：默认斋模式</li>
+          </ul>
+
+          <h3>加码规则</h3>
+          <ul>
+            <li>同模式：数量更大，或同数量点数更大</li>
+            <li>斋→飞：数量至少+2</li>
+            <li>飞→斋：数量至少-1</li>
+          </ul>
+
+          <h3>特殊牌型</h3>
+          <ul>
+            <li><strong>单骰</strong>：5颗全不同 → 骰子归零</li>
+            <li><strong>豹子</strong>：含1凑5颗同 → 该点数算6个</li>
+            <li><strong>纯豹</strong>：5颗完全相同 → 该点数算7个</li>
+          </ul>
+
+          <h3>开骰</h3>
+          <p>不信对方叫数时选择"开"，揭晓所有骰子统计实际数量。叫数成立则开的人输，不成立则叫的人输。</p>
+
+          <h3>劈骰</h3>
+          <ul>
+            <li><strong>劈</strong>：不信对方 + 倍数×2</li>
+            <li>被劈后可选：<strong>开骰</strong>（按倍数结算）/ <strong>反劈</strong>（倍数再×2）/ <strong>认输</strong>（扣一半分）</li>
+            <li>最多劈3次，上限×8</li>
+          </ul>
+
+          <h3>计分</h3>
+          <p>输的人得分（分数越高越差）。普通开+1分，劈骰按倍数算，认输扣当前倍数÷2。</p>
+        </div>
+        <button class="btn btn-primary" id="btn-back-home">返回首页</button>
+      </div>
+    </div>
+
+    <!-- Toast 提示 -->
+    <div id="toast" class="toast"></div>
+
+    <!-- 断线提示 -->
+    <div id="disconnect-overlay" class="overlay" style="display:none;">
+      <div class="overlay-content">
+        <div class="loading-spinner"></div>
+        <p>网络连接断开，正在重连...</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
