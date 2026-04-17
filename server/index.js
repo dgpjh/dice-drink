@@ -27,15 +27,46 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
   }
 }));
 
+// 编码诊断端点（部署后可通过 /debug-encoding 检查编码是否正常）
+app.get('/debug-encoding', (req, res) => {
+  const fs = require('fs');
+  const htmlPath = path.join(__dirname, '..', 'public', 'index.html');
+  
+  fs.readFile(htmlPath, (err, buf) => {
+    const info = {
+      fileExists: !err,
+      fileSize: buf ? buf.length : 0,
+      firstThreeBytes: buf ? [buf[0], buf[1], buf[2]].map(b => '0x' + b.toString(16)) : null,
+      hasBOM: buf ? (buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) : false,
+      nodeVersion: process.version,
+      platform: process.platform,
+      encoding: 'UTF-8 test: 你好世界 🎲 大话骰',
+      headers: req.headers
+    };
+    
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(info, null, 2));
+  });
+});
+
 // 房间分享链接 - 动态注入 meta 标签 + 确保 UTF-8 编码
 app.get('/room/:roomCode', (req, res) => {
   const roomCode = req.params.roomCode.toUpperCase();
   const fs = require('fs');
   const htmlPath = path.join(__dirname, '..', 'public', 'index.html');
   
-  fs.readFile(htmlPath, 'utf8', (err, html) => {
+  // ★ 用 Buffer 方式读取，完全避免 Node.js 内部编码转换问题
+  fs.readFile(htmlPath, (err, buf) => {
     if (err) {
       return res.sendFile(htmlPath);
+    }
+    
+    // 将 Buffer 转为 UTF-8 字符串进行替换
+    let html = buf.toString('utf8');
+    
+    // 如果文件有 BOM，去掉
+    if (html.charCodeAt(0) === 0xFEFF) {
+      html = html.slice(1);
     }
     
     // 获取当前请求的完整基础 URL
@@ -86,15 +117,33 @@ app.get('/room/:roomCode', (req, res) => {
       `<title>🎲 大话骰 - 房间 ${roomCode} 邀你对战！</title>`
     );
     
-    // ★ 关键：明确设置 Content-Type 为 UTF-8，防止浏览器/QQ/微信乱码
-    res.set('Content-Type', 'text/html; charset=utf-8');
-    res.send(html);
+    // ★ 关键：将修改后的 HTML 字符串转为 UTF-8 Buffer 再发送
+    // 使用 writeHead + end(buffer) 确保编码不被任何中间层覆盖
+    const resultBuffer = Buffer.from(html, 'utf8');
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': resultBuffer.length,
+      'X-Content-Type-Options': 'nosniff'
+    });
+    res.end(resultBuffer);
   });
 });
 
 app.get('*', (req, res) => {
-  res.set('Content-Type', 'text/html; charset=utf-8');
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  const fs = require('fs');
+  const htmlPath = path.join(__dirname, '..', 'public', 'index.html');
+  fs.readFile(htmlPath, (err, buf) => {
+    if (err) {
+      res.status(500).send('Internal Server Error');
+      return;
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Content-Length': buf.length,
+      'X-Content-Type-Options': 'nosniff'
+    });
+    res.end(buf);
+  });
 });
 
 // =============== 房间管理 ===============
