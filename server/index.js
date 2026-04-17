@@ -78,28 +78,28 @@ app.get('/room/:roomCode', (req, res) => {
     
     // 动态替换 meta 标签，让每个房间链接都有独特的预览信息
     html = html.replace(
-      '<meta property="og:title" content="🎲 大话骰 - 来战！">',
-      `<meta property="og:title" content="🎲 大话骰 - 邀你对战！房间号 ${roomCode}">`
+      '<meta property="og:title" content="🎲 菜就多练！摇把骰子！">',
+      `<meta property="og:title" content="🎲 菜就多练！房间号 ${roomCode}，来摇骰子！">`
     );
     html = html.replace(
-      '<meta property="og:description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲">',
-      `<meta property="og:description" content="你的朋友邀请你来一局大话骰！点击链接直接加入房间 ${roomCode}，一起摇骰子对战 🎲">`
+      '<meta property="og:description" content="酒吧大话骰在线版！摇骰子、叫数、开骰，输了就得喝 🍺">',
+      `<meta property="og:description" content="朋友喊你来酒吧摇骰子！房间 ${roomCode}，输了就得喝 🍺">`
     );
     html = html.replace(
-      '<meta name="twitter:title" content="🎲 大话骰 - 来战！">',
-      `<meta name="twitter:title" content="🎲 大话骰 - 邀你对战！房间号 ${roomCode}">`
+      '<meta name="twitter:title" content="🎲 菜就多练！摇把骰子！">',
+      `<meta name="twitter:title" content="🎲 菜就多练！房间号 ${roomCode}，来摇骰子！">`
     );
     html = html.replace(
-      '<meta name="twitter:description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲">',
-      `<meta name="twitter:description" content="你的朋友邀请你来一局大话骰！点击链接直接加入房间 ${roomCode} 🎲">`
+      '<meta name="twitter:description" content="酒吧大话骰在线版！摇骰子、叫数、开骰，输了就得喝 🍺">',
+      `<meta name="twitter:description" content="朋友喊你来酒吧摇骰子！房间 ${roomCode}，输了就得喝 🍺">`
     );
     html = html.replace(
-      '<meta itemprop="name" content="🎲 大话骰 - 来战！">',
-      `<meta itemprop="name" content="🎲 大话骰 - 邀你对战！房间号 ${roomCode}">`
+      '<meta itemprop="name" content="🎲 菜就多练！摇把骰子！">',
+      `<meta itemprop="name" content="🎲 菜就多练！房间号 ${roomCode}，来摇骰子！">`
     );
     html = html.replace(
-      '<meta itemprop="description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲">',
-      `<meta itemprop="description" content="你的朋友邀请你来一局大话骰！点击链接加入房间 ${roomCode} 🎲">`
+      '<meta itemprop="description" content="酒吧大话骰在线版！摇骰子、叫数、开骰，输了就得喝 🍺">',
+      `<meta itemprop="description" content="朋友喊你来酒吧摇骰子！房间 ${roomCode}，输了就得喝 🍺">`
     );
     
     // 添加 og:url
@@ -113,8 +113,8 @@ app.get('/room/:roomCode', (req, res) => {
     
     // 更新 title
     html = html.replace(
-      '<title>🎲 大话骰 - 双人在线对战</title>',
-      `<title>🎲 大话骰 - 房间 ${roomCode} 邀你对战！</title>`
+      '<title>🎲 大话骰 - 酒吧在线对战</title>',
+      `<title>🎲 菜就多练！房间 ${roomCode} 等你来摇！</title>`
     );
     
     // ★ 关键：将修改后的 HTML 字符串转为 UTF-8 Buffer 再发送

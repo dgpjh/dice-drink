@@ -393,7 +393,7 @@ document.getElementById('btn-copy-link').addEventListener('click', () => {
   const portPart = port ? `:${port}` : '';
   const link = `${protocol}//${host}${portPart}/room/${state.roomCode}`;
   // 复制带引导文案的分享消息，而非裸链接
-  const shareText = `🎲 来一局大话骰！\n房间号：${state.roomCode}\n点击链接直接加入👇\n${link}`;
+  const shareText = `🎲 菜就多练！摇把骰子！\n房间号：${state.roomCode}\n点击链接直接加入👇\n${link}`;
   copyToClipboard(shareText);
   showToast('邀请消息已复制，发给朋友吧！', 'success');
 });
@@ -1077,7 +1077,7 @@ function showSettlementPage(data) {
 
   // 战绩统计
   const statsEl = document.getElementById('settlement-stats');
-  statsEl.innerHTML = '<div class="stats-title">当前战绩</div>';
+  statsEl.innerHTML = '<div class="stats-title">🍻 今晚战绩</div>';
   if (data.stats) {
     for (const [pid, stat] of Object.entries(data.stats)) {
       const name = pid === state.playerId ? state.nickname : (state.opponent?.nickname || '对手');
@@ -1095,9 +1095,9 @@ function showSettlementPage(data) {
 // 再来一局
 document.getElementById('btn-play-again').addEventListener('click', () => {
   sendMsg('play_again');
-  showToast('等待对方确认...');
+  showToast('等对方续杯...');
   document.getElementById('btn-play-again').disabled = true;
-  document.getElementById('btn-play-again').textContent = '等待对方确认...';
+  document.getElementById('btn-play-again').textContent = '等对方续杯...';
 });
 
 // 退出
