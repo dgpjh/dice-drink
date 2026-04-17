@@ -47,12 +47,20 @@ const state = {
 
 // =============== WebSocket ===============
 function connectWS() {
+  // 如果已有连接且处于 OPEN 或 CONNECTING 状态，不重复创建
+  if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) {
+    console.log('[WS] 已有连接，跳过');
+    return;
+  }
+
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${location.host}`;
+  console.log('[WS] 正在连接:', wsUrl);
 
   state.ws = new WebSocket(wsUrl);
 
   state.ws.onopen = () => {
+    console.log('[WS] 连接成功');
     state.connected = true;
     state.reconnectAttempts = 0;
     hideDisconnectOverlay();
@@ -68,10 +76,12 @@ function connectWS() {
 
   state.ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
+    console.log('[WS] 收到:', msg.type, msg.data);
     handleMessage(msg);
   };
 
   state.ws.onclose = () => {
+    console.log('[WS] 连接关闭');
     state.connected = false;
     if (state.phase !== 'home' && state.roomCode) {
       showDisconnectOverlay();
@@ -79,7 +89,9 @@ function connectWS() {
     }
   };
 
-  state.ws.onerror = () => {};
+  state.ws.onerror = (err) => {
+    console.error('[WS] 错误:', err);
+  };
 }
 
 function attemptReconnect() {
@@ -288,6 +300,7 @@ let pendingAction = null;
 
 // 创建房间 → 先选人数
 document.getElementById('btn-create-room').addEventListener('click', () => {
+  console.log('[UI] 点击创建房间，弹出选人数弹窗');
   state.selectedMaxPlayers = 2;
   // 重置人数选择器
   document.querySelectorAll('.count-btn').forEach(btn => {
@@ -302,6 +315,7 @@ document.getElementById('player-count-selector').addEventListener('click', (e) =
   const btn = e.target.closest('.count-btn');
   if (!btn) return;
   state.selectedMaxPlayers = parseInt(btn.dataset.count);
+  console.log('[UI] 选择人数:', state.selectedMaxPlayers);
   document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('total-dice-hint').textContent = `场上共 ${state.selectedMaxPlayers * 5} 颗骰子`;
@@ -309,6 +323,7 @@ document.getElementById('player-count-selector').addEventListener('click', (e) =
 
 // 确认创建 → 设置昵称
 document.getElementById('btn-confirm-create-room').addEventListener('click', () => {
+  console.log('[UI] 点击下一步，选择人数:', state.selectedMaxPlayers);
   hideModal('modal-create');
   pendingAction = 'create';
   document.getElementById('input-nickname').value = '';
@@ -363,12 +378,19 @@ function handleCreateRoom() {
   state.maxPlayers = state.selectedMaxPlayers;
   hideAllModals();
 
+  console.log('[创建房间]', { nickname, maxPlayers: state.maxPlayers, connected: state.connected });
+
   if (!state.connected) {
     connectWS();
+    let attempts = 0;
     const checkConnection = setInterval(() => {
+      attempts++;
       if (state.connected) {
         clearInterval(checkConnection);
         sendMsg('create_room', { nickname, playerId: state.playerId, maxPlayers: state.maxPlayers });
+      } else if (attempts > 50) {
+        clearInterval(checkConnection);
+        showToast('连接服务器失败，请刷新页面重试', 'error');
       }
     }, 100);
   } else {
@@ -1380,11 +1402,13 @@ function showDanmaku(data) {
 
 // =============== 初始化 ===============
 function init() {
+  console.log('[Init] 页面加载，playerId:', state.playerId);
   connectWS();
 
   // 检查 URL 是否包含房间码（链接直达）
   const roomCode = getRoomCodeFromURL();
   if (roomCode) {
+    console.log('[Init] URL中发现房间码:', roomCode);
     state.roomCode = roomCode;
     pendingAction = 'join';
     document.getElementById('input-nickname').value = '';
