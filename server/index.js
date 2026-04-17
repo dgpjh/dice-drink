@@ -13,10 +13,21 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// 静态文件
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// 静态文件 - 设置正确的 charset，防止中文乱码
+app.use(express.static(path.join(__dirname, '..', 'public'), {
+  setHeaders: (res, filePath) => {
+    // 为 HTML、CSS、JS 文件设置 UTF-8 编码
+    if (filePath.endsWith('.html')) {
+      res.set('Content-Type', 'text/html; charset=utf-8');
+    } else if (filePath.endsWith('.css')) {
+      res.set('Content-Type', 'text/css; charset=utf-8');
+    } else if (filePath.endsWith('.js')) {
+      res.set('Content-Type', 'application/javascript; charset=utf-8');
+    }
+  }
+}));
 
-// 房间分享链接 - 动态注入 meta 标签，让社交平台（微信/QQ）抓取卡片预览
+// 房间分享链接 - 动态注入 meta 标签 + 确保 UTF-8 编码
 app.get('/room/:roomCode', (req, res) => {
   const roomCode = req.params.roomCode.toUpperCase();
   const fs = require('fs');
@@ -75,11 +86,14 @@ app.get('/room/:roomCode', (req, res) => {
       `<title>🎲 大话骰 - 房间 ${roomCode} 邀你对战！</title>`
     );
     
+    // ★ 关键：明确设置 Content-Type 为 UTF-8，防止浏览器/QQ/微信乱码
+    res.set('Content-Type', 'text/html; charset=utf-8');
     res.send(html);
   });
 });
 
 app.get('*', (req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
