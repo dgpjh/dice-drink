@@ -16,9 +16,67 @@ const wss = new WebSocketServer({ server });
 // 静态文件
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// 所有路由指向 index.html（SPA）
+// 房间分享链接 - 动态注入 meta 标签，让社交平台（微信/QQ）抓取卡片预览
 app.get('/room/:roomCode', (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  const roomCode = req.params.roomCode.toUpperCase();
+  const fs = require('fs');
+  const htmlPath = path.join(__dirname, '..', 'public', 'index.html');
+  
+  fs.readFile(htmlPath, 'utf8', (err, html) => {
+    if (err) {
+      return res.sendFile(htmlPath);
+    }
+    
+    // 获取当前请求的完整基础 URL
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers.host || req.hostname;
+    const baseUrl = `${protocol}://${host}`;
+    const fullUrl = `${baseUrl}/room/${roomCode}`;
+    const ogImageUrl = `${baseUrl}/og-image.svg`;
+    
+    // 动态替换 meta 标签，让每个房间链接都有独特的预览信息
+    html = html.replace(
+      '<meta property="og:title" content="🎲 大话骰 - 来战！">',
+      `<meta property="og:title" content="🎲 大话骰 - 邀你对战！房间号 ${roomCode}">`
+    );
+    html = html.replace(
+      '<meta property="og:description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲">',
+      `<meta property="og:description" content="你的朋友邀请你来一局大话骰！点击链接直接加入房间 ${roomCode}，一起摇骰子对战 🎲">`
+    );
+    html = html.replace(
+      '<meta name="twitter:title" content="🎲 大话骰 - 来战！">',
+      `<meta name="twitter:title" content="🎲 大话骰 - 邀你对战！房间号 ${roomCode}">`
+    );
+    html = html.replace(
+      '<meta name="twitter:description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲">',
+      `<meta name="twitter:description" content="你的朋友邀请你来一局大话骰！点击链接直接加入房间 ${roomCode} 🎲">`
+    );
+    html = html.replace(
+      '<meta itemprop="name" content="🎲 大话骰 - 来战！">',
+      `<meta itemprop="name" content="🎲 大话骰 - 邀你对战！房间号 ${roomCode}">`
+    );
+    html = html.replace(
+      '<meta itemprop="description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲">',
+      `<meta itemprop="description" content="你的朋友邀请你来一局大话骰！点击链接加入房间 ${roomCode} 🎲">`
+    );
+    
+    // 添加 og:url
+    html = html.replace(
+      '<meta property="og:site_name" content="大话骰">',
+      `<meta property="og:url" content="${fullUrl}">\n  <meta property="og:site_name" content="大话骰">`
+    );
+    
+    // 动态替换 og:image 为完整 URL
+    html = html.replace(/content="\/og-image\.svg"/g, `content="${ogImageUrl}"`);
+    
+    // 更新 title
+    html = html.replace(
+      '<title>🎲 大话骰 - 双人在线对战</title>',
+      `<title>🎲 大话骰 - 房间 ${roomCode} 邀你对战！</title>`
+    );
+    
+    res.send(html);
+  });
 });
 
 app.get('*', (req, res) => {

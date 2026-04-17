@@ -392,8 +392,10 @@ document.getElementById('btn-copy-link').addEventListener('click', () => {
   const port = location.port;
   const portPart = port ? `:${port}` : '';
   const link = `${protocol}//${host}${portPart}/room/${state.roomCode}`;
-  copyToClipboard(link);
-  showToast('邀请链接已复制：' + link, 'success');
+  // 复制带引导文案的分享消息，而非裸链接
+  const shareText = `🎲 来一局大话骰！\n房间号：${state.roomCode}\n点击链接直接加入👇\n${link}`;
+  copyToClipboard(shareText);
+  showToast('邀请消息已复制，发给朋友吧！', 'success');
 });
 
 document.getElementById('btn-leave-waiting').addEventListener('click', () => {
