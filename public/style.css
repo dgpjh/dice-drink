@@ -1259,9 +1259,28 @@ html, body {
   border-color: var(--secondary);
 }
 
+.player-item.bot {
+  border-color: var(--warning);
+  background: rgba(253, 203, 110, 0.08);
+}
+
 .player-item.empty {
   opacity: 0.5;
   border-style: dashed;
+}
+
+/* 添加机器人按钮 */
+.btn-add-bot {
+  width: 100%;
+  max-width: 300px;
+  padding: 14px 24px;
+  font-size: 16px;
+  animation: glowPulseBot 2s ease infinite;
+}
+
+@keyframes glowPulseBot {
+  0%, 100% { box-shadow: 0 0 8px rgba(253, 203, 110, 0.3); }
+  50% { box-shadow: 0 0 20px rgba(253, 203, 110, 0.6); }
 }
 
 /* =============== 多人对手区域 =============== */

@@ -8,6 +8,7 @@ const { WebSocketServer } = require('ws');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const Room = require('./Room');
+const BotPlayer = require('./BotPlayer');
 
 const app = express();
 const server = http.createServer(app);
@@ -150,6 +151,8 @@ app.get('*', (req, res) => {
 
 const rooms = {};  // { roomCode: Room }
 const playerRooms = {};  // { playerId: roomCode }
+const bots = {};   // { playerId: BotPlayer }
+const botTimers = {}; // { playerId: timer } Bot 延迟操作计时器
 
 function generateRoomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -167,12 +170,183 @@ function cleanupRoom(roomCode) {
   const room = rooms[roomCode];
   if (!room) return;
   room.cleanup();
-  // 清理玩家映射
+  // 清理玩家映射和 Bot
   for (const pid of room.playerOrder) {
     delete playerRooms[pid];
+    if (bots[pid]) {
+      if (botTimers[pid]) {
+        clearTimeout(botTimers[pid]);
+        delete botTimers[pid];
+      }
+      delete bots[pid];
+    }
   }
   delete rooms[roomCode];
   console.log(`[Room] 房间 ${roomCode} 已销毁`);
+}
+
+// =============== Bot 自动操作 ===============
+
+/**
+ * 检查当前回合是否轮到 Bot，如果是则自动执行操作
+ */
+function scheduleBotAction(roomCode) {
+  const room = rooms[roomCode];
+  if (!room) return;
+
+  let currentPlayerId;
+  if (room.phase === 'bidding') {
+    currentPlayerId = room.currentGame?.currentTurn;
+  } else if (room.phase === 'challenging') {
+    currentPlayerId = room.currentGame?.challenge?.currentTurn;
+  } else {
+    return;
+  }
+
+  if (!currentPlayerId || !bots[currentPlayerId]) return;
+
+  const bot = bots[currentPlayerId];
+  const delay = 1500 + Math.floor(Math.random() * 2000); // 1.5~3.5秒延迟，模拟思考
+
+  // 清除之前的计时器
+  if (botTimers[currentPlayerId]) {
+    clearTimeout(botTimers[currentPlayerId]);
+  }
+
+  botTimers[currentPlayerId] = setTimeout(() => {
+    delete botTimers[currentPlayerId];
+    executeBotAction(roomCode, currentPlayerId);
+  }, delay);
+}
+
+/**
+ * 执行 Bot 的操作
+ */
+function executeBotAction(roomCode, botPlayerId) {
+  const room = rooms[roomCode];
+  if (!room || !bots[botPlayerId]) return;
+
+  const bot = bots[botPlayerId];
+  const player = room.players[botPlayerId];
+  if (!player) return;
+
+  const context = {
+    myDice: player.dice || [],
+    lastBid: room.currentGame?.lastBid || null,
+    bids: room.currentGame?.bids || [],
+    totalDice: room.playerOrder.length * 5,
+    phase: room.phase,
+    challenge: room.currentGame?.challenge || null
+  };
+
+  const decision = bot.decide(context);
+  console.log(`[Bot] ${bot.nickname} 决策:`, decision.action, decision.data || '');
+
+  let result;
+  switch (decision.action) {
+    case 'bid':
+      result = room.handleBid(botPlayerId, {
+        quantity: decision.data.quantity,
+        value: decision.data.value,
+        mode: decision.data.mode || 'fly'
+      });
+      if (!result.success) {
+        // 叫数失败，改为开骰
+        console.log(`[Bot] ${bot.nickname} 叫数失败(${result.reason})，改为开骰`);
+        if (room.currentGame?.lastBid) {
+          room.handleOpen(botPlayerId);
+        }
+      }
+      break;
+
+    case 'open':
+      result = room.handleOpen(botPlayerId);
+      if (!result.success) {
+        // 开骰失败（可能没人叫过），尝试叫数
+        const firstBid = bot.makeFirstBid(player.dice, room.playerOrder.length * 5);
+        room.handleBid(botPlayerId, firstBid);
+      }
+      break;
+
+    case 'challenge':
+      result = room.handleChallenge(botPlayerId);
+      if (!result.success) {
+        room.handleOpen(botPlayerId);
+      }
+      break;
+
+    case 'challenge_open':
+      room.handleChallengeOpen(botPlayerId);
+      break;
+
+    case 'counter_challenge':
+      result = room.handleCounterChallenge(botPlayerId);
+      if (!result.success) {
+        room.handleChallengeOpen(botPlayerId);
+      }
+      break;
+
+    case 'surrender':
+      room.handleSurrender(botPlayerId);
+      break;
+  }
+
+  // 操作后检查是否轮到下一个 Bot
+  setTimeout(() => scheduleBotAction(roomCode), 200);
+}
+
+/**
+ * Bot 自动点"再来一局"
+ */
+function scheduleBotPlayAgain(roomCode) {
+  const room = rooms[roomCode];
+  if (!room) return;
+
+  for (const pid of room.playerOrder) {
+    if (bots[pid]) {
+      const delay = 1000 + Math.floor(Math.random() * 2000);
+      setTimeout(() => {
+        if (rooms[roomCode] && room.phase === 'settling') {
+          room.handlePlayAgain(pid);
+        }
+      }, delay);
+    }
+  }
+}
+
+/**
+ * 处理 Bot 通过 fakeWs 收到的消息
+ */
+function handleBotMessage(roomCode, botId, msg) {
+  const { type, data } = msg;
+
+  switch (type) {
+    case 'game_start':
+      // 游戏开始，检查是否轮到 Bot
+      setTimeout(() => scheduleBotAction(roomCode), 500);
+      break;
+
+    case 'bid_made':
+      // 有人叫数了，检查下一个是否是 Bot
+      setTimeout(() => scheduleBotAction(roomCode), 200);
+      break;
+
+    case 'challenge_started':
+    case 'counter_challenge':
+      // 劈骰相关，检查是否轮到 Bot
+      setTimeout(() => scheduleBotAction(roomCode), 200);
+      break;
+
+    case 'game_settled':
+      // 结算了，Bot 自动"再来一局"
+      scheduleBotPlayAgain(roomCode);
+      break;
+
+    case 'timer_start':
+      // 计时器开始，确保 Bot 在超时前操作
+      setTimeout(() => scheduleBotAction(roomCode), 300);
+      break;
+  }
 }
 
 // =============== WebSocket ===============
@@ -281,6 +455,8 @@ wss.on('connection', (ws) => {
         if (room.playerOrder.length === room.maxPlayers) {
           setTimeout(() => {
             room.startGame();
+            // 游戏开始后检查是否轮到 Bot
+            setTimeout(() => scheduleBotAction(roomCode), 500);
           }, 2000);
         }
         break;
@@ -423,6 +599,61 @@ wss.on('connection', (ws) => {
             type: 'reconnect_failed',
             data: { message: '房间已不存在' }
           }));
+        }
+        break;
+      }
+
+      case 'add_bot': {
+        const room = rooms[currentRoomCode];
+        if (!room) {
+          ws.send(JSON.stringify({ type: 'error', data: { message: '房间不存在' } }));
+          return;
+        }
+        if (room.phase !== Room.PHASE.WAITING) {
+          ws.send(JSON.stringify({ type: 'error', data: { message: '游戏已开始，无法添加机器人' } }));
+          return;
+        }
+        if (room.playerOrder.length >= room.maxPlayers) {
+          ws.send(JSON.stringify({ type: 'error', data: { message: '房间已满' } }));
+          return;
+        }
+
+        // 获取已有昵称
+        const existingNames = room.playerOrder.map(pid => room.players[pid].nickname);
+        const botId = 'bot_' + uuidv4().substring(0, 8);
+        const botNickname = '🤖' + BotPlayer.getRandomName(existingNames);
+        const bot = new BotPlayer(botId, botNickname);
+        bots[botId] = bot;
+
+        // 用一个假的 ws（Bot 不需要真正的 WebSocket）
+        const fakeWs = {
+          send: (msg) => {
+            // Bot 收到的消息可以触发后续操作
+            try {
+              const parsed = JSON.parse(msg);
+              handleBotMessage(currentRoomCode, botId, parsed);
+            } catch (e) {}
+          },
+          readyState: 1 // WebSocket.OPEN
+        };
+
+        const result = room.addPlayer(botId, botNickname, fakeWs);
+        if (!result.success) {
+          ws.send(JSON.stringify({ type: 'error', data: { message: result.reason } }));
+          delete bots[botId];
+          return;
+        }
+
+        playerRooms[botId] = currentRoomCode;
+        console.log(`[Bot] ${botNickname} 加入房间 ${currentRoomCode}`);
+
+        // 如果房间满了，2秒后自动开始
+        if (room.playerOrder.length === room.maxPlayers) {
+          setTimeout(() => {
+            room.startGame();
+            // 游戏开始后检查是否轮到 Bot
+            setTimeout(() => scheduleBotAction(currentRoomCode), 500);
+          }, 2000);
         }
         break;
       }

@@ -405,10 +405,15 @@ function handleJoinRoom() {
 
   if (!state.connected) {
     connectWS();
+    let attempts = 0;
     const checkConnection = setInterval(() => {
+      attempts++;
       if (state.connected) {
         clearInterval(checkConnection);
         sendMsg('join_room', { roomCode: state.roomCode, nickname, playerId: state.playerId });
+      } else if (attempts > 50) {
+        clearInterval(checkConnection);
+        showToast('连接服务器失败，请刷新页面重试', 'error');
       }
     }, 100);
   } else {
@@ -452,9 +457,10 @@ function updateWaitingPlayerList() {
     if (i < players.length) {
       const p = players[i];
       const isMe = p.id === state.playerId;
-      div.className = `player-item ${isMe ? 'you' : 'other'}`;
+      const isBot = (p.id && p.id.startsWith('bot_')) || (p.nickname && p.nickname.startsWith('🤖'));
+      div.className = `player-item ${isMe ? 'you' : (isBot ? 'bot' : 'other')}`;
       div.innerHTML = `
-        <span class="player-status">✅</span>
+        <span class="player-status">${isBot ? '🤖' : '✅'}</span>
         <span class="player-name">${p.nickname}${isMe ? '（你）' : ''}</span>
       `;
     } else {
@@ -466,6 +472,8 @@ function updateWaitingPlayerList() {
     }
     container.appendChild(div);
   }
+
+  updateAddBotButton();
 }
 
 function startRoomCountdown() {
@@ -512,6 +520,25 @@ document.getElementById('btn-leave-waiting').addEventListener('click', () => {
   clearRoomCountdown();
   showPage('home');
 });
+
+// 添加机器人
+document.getElementById('btn-add-bot').addEventListener('click', () => {
+  console.log('[UI] 点击添加机器人');
+  sendMsg('add_bot');
+});
+
+function updateAddBotButton() {
+  const btn = document.getElementById('btn-add-bot');
+  const currentCount = (state.playerOrder || []).length;
+  const remaining = state.maxPlayers - currentCount;
+  if (remaining <= 0) {
+    btn.style.display = 'none';
+  } else {
+    btn.style.display = 'inline-flex';
+    btn.textContent = '';
+    btn.innerHTML = `<span class="btn-icon">🤖</span> 添加机器人（还差${remaining}人）`;
+  }
+}
 
 // =============== 对局页面 ===============
 function showGamePage(data) {

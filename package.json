@@ -1,6 +1,6 @@
 {
   "name": "liars-dice",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "大话骰 - 2-4人在线对战 H5 游戏",
   "main": "server/index.js",
   "scripts": {
