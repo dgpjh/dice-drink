@@ -1,12 +1,12 @@
 /**
- * 大话骰 - 房间管理
+ * 大话骰 - 房间管理（支持2-4人）
  * 包含：房间创建/加入、游戏状态机、超时处理、断线重连
  */
 const GameEngine = require('./gameEngine');
 
 // 游戏阶段
 const PHASE = {
-  WAITING: 'waiting',      // 等待对手
+  WAITING: 'waiting',      // 等待玩家
   ROLLING: 'rolling',      // 摇骰阶段
   BIDDING: 'bidding',      // 叫数阶段
   CHALLENGING: 'challenging', // 劈骰阶段
@@ -15,14 +15,15 @@ const PHASE = {
 };
 
 class Room {
-  constructor(roomCode, hostPlayerId) {
+  constructor(roomCode, hostPlayerId, maxPlayers = 2) {
     this.roomCode = roomCode;
     this.createdAt = Date.now();
     this.phase = PHASE.WAITING;
+    this.maxPlayers = Math.min(Math.max(maxPlayers, 2), 4); // 限制2-4人
 
     // 玩家
     this.players = {};  // { playerId: { id, nickname, ws, dice, connected, disconnectedAt } }
-    this.playerOrder = []; // [playerId1, playerId2]
+    this.playerOrder = []; // [playerId1, playerId2, ...] 座位顺序
 
     // 对局状态
     this.currentGame = null;
@@ -58,7 +59,7 @@ class Room {
   }
 
   addPlayer(playerId, nickname, ws) {
-    if (this.playerOrder.length >= 2) {
+    if (this.playerOrder.length >= this.maxPlayers) {
       return { success: false, reason: '房间已满' };
     }
 
@@ -73,12 +74,13 @@ class Room {
     this.playerOrder.push(playerId);
     this.stats[playerId] = { wins: 0, losses: 0, totalScore: 0, streak: 0 };
 
-    // 两人到齐，清除房间超时
-    if (this.playerOrder.length === 2) {
+    // 人满，清除房间超时
+    if (this.playerOrder.length === this.maxPlayers) {
       this.clearRoomTimeout();
-      // 通知双方玩家信息
-      this.broadcastPlayerInfo();
     }
+
+    // 通知所有玩家信息更新
+    this.broadcastPlayerInfo();
 
     return { success: true };
   }
@@ -90,18 +92,50 @@ class Room {
     }
   }
 
+  /**
+   * 获取下一个玩家（按座位顺序轮转）
+   */
+  getNextPlayer(currentPlayerId) {
+    const idx = this.playerOrder.indexOf(currentPlayerId);
+    if (idx === -1) return null;
+    const nextIdx = (idx + 1) % this.playerOrder.length;
+    return this.playerOrder[nextIdx];
+  }
+
+  /**
+   * 获取除指定玩家外的所有其他玩家
+   */
+  getOtherPlayers(playerId) {
+    return this.playerOrder.filter(id => id !== playerId);
+  }
+
+  /**
+   * 获取对手（2人模式兼容）
+   */
   getOpponent(playerId) {
     return this.playerOrder.find(id => id !== playerId);
   }
 
   broadcastPlayerInfo() {
     for (const pid of this.playerOrder) {
-      const opId = this.getOpponent(pid);
       const player = this.players[pid];
-      const opponent = opId ? this.players[opId] : null;
+      const others = this.getOtherPlayers(pid).map(opId => ({
+        id: opId,
+        nickname: this.players[opId].nickname,
+        connected: this.players[opId].connected
+      }));
+
       this.sendTo(pid, 'player_info', {
         you: { id: pid, nickname: player.nickname },
-        opponent: opponent ? { id: opId, nickname: opponent.nickname } : null,
+        // 兼容旧版：2人模式仍提供 opponent 字段
+        opponent: others.length === 1 ? { id: others[0].id, nickname: others[0].nickname } : null,
+        others,
+        playerOrder: this.playerOrder.map(id => ({
+          id,
+          nickname: this.players[id].nickname,
+          connected: this.players[id].connected
+        })),
+        maxPlayers: this.maxPlayers,
         stats: this.stats
       });
     }
@@ -110,7 +144,7 @@ class Room {
   // =============== 游戏流程 ===============
 
   startGame() {
-    if (this.playerOrder.length !== 2) return;
+    if (this.playerOrder.length < 2) return;
 
     this.phase = PHASE.ROLLING;
 
@@ -125,10 +159,15 @@ class Room {
     let firstPlayer;
     if (!this.currentGame || !this.currentGame.loser) {
       // 首局随机
-      firstPlayer = this.playerOrder[Math.random() < 0.5 ? 0 : 1];
+      const randomIdx = Math.floor(Math.random() * this.playerOrder.length);
+      firstPlayer = this.playerOrder[randomIdx];
     } else {
       // 后续局：输家先叫
       firstPlayer = this.currentGame.loser;
+      // 如果输家不在列表中（可能断线被移除），随机选
+      if (!this.playerOrder.includes(firstPlayer)) {
+        firstPlayer = this.playerOrder[Math.floor(Math.random() * this.playerOrder.length)];
+      }
     }
 
     this.currentGame = {
@@ -155,7 +194,12 @@ class Room {
         firstPlayer,
         currentTurn: firstPlayer,
         phase: this.phase,
-        stats: this.stats
+        stats: this.stats,
+        playerOrder: this.playerOrder.map(id => ({
+          id,
+          nickname: this.players[id].nickname
+        })),
+        totalDice: this.playerOrder.length * 5
       });
     }
 
@@ -195,8 +239,8 @@ class Room {
     this.currentGame.lastBid = bid;
     this.currentGame.lastBidder = playerId;
 
-    // 切换回合
-    const nextPlayer = this.getOpponent(playerId);
+    // 切换到下一位玩家
+    const nextPlayer = this.getNextPlayer(playerId);
     this.currentGame.currentTurn = nextPlayer;
 
     // 广播叫数
@@ -310,8 +354,8 @@ class Room {
     // 倍数翻倍
     challenge.multiplier *= 2;
     challenge.count += 1;
-    // 踢回给对方
-    const opponent = this.getOpponent(playerId);
+    // 踢回给对方（劈骰始终在两人之间）
+    const opponent = (playerId === challenge.initiator) ? challenge.target : challenge.initiator;
     challenge.currentTurn = opponent;
 
     this.broadcast('counter_challenge', {
@@ -344,7 +388,10 @@ class Room {
     this.clearTurnTimeout();
     const multiplier = this.currentGame.challenge.multiplier;
     const score = GameEngine.calculateScore('surrender', multiplier);
-    const winner = this.getOpponent(playerId);
+
+    // 认输者的对手（劈骰发起者或被反劈者）
+    const challenge = this.currentGame.challenge;
+    const winner = (playerId === challenge.initiator) ? challenge.target : challenge.initiator;
 
     this.currentGame.winner = winner;
     this.currentGame.loser = playerId;
@@ -365,6 +412,16 @@ class Room {
 
     this.phase = PHASE.SETTLING;
 
+    // 构建所有玩家骰子信息
+    const allDice = {};
+    for (const pid of this.playerOrder) {
+      allDice[pid] = {
+        dice: this.players[pid].dice,
+        nickname: this.players[pid].nickname,
+        pattern: GameEngine.detectPattern(this.players[pid].dice)
+      };
+    }
+
     // 广播认输结算
     this.broadcast('game_settled', {
       type: 'surrender',
@@ -376,52 +433,45 @@ class Room {
       loserNickname: this.players[playerId].nickname,
       multiplier,
       score,
-      // 揭示所有骰子
-      allDice: {
-        [this.playerOrder[0]]: {
-          dice: this.players[this.playerOrder[0]].dice,
-          pattern: GameEngine.detectPattern(this.players[this.playerOrder[0]].dice)
-        },
-        [this.playerOrder[1]]: {
-          dice: this.players[this.playerOrder[1]].dice,
-          pattern: GameEngine.detectPattern(this.players[this.playerOrder[1]].dice)
-        }
-      },
+      allDice,
       lastBid: this.currentGame.lastBid,
       bids: this.currentGame.bids,
       stats: this.stats,
-      phase: this.phase
+      phase: this.phase,
+      playerOrder: this.playerOrder.map(id => ({
+        id,
+        nickname: this.players[id].nickname
+      }))
     });
 
     return { success: true };
   }
 
   /**
-   * 开骰结算
+   * 开骰结算（支持多人）
    */
   resolveGame(openerPlayerId, resultType, multiplier) {
     const lastBid = this.currentGame.lastBid;
     const lastBidder = this.currentGame.lastBidder;
 
-    const pidA = this.playerOrder[0];
-    const pidB = this.playerOrder[1];
+    // 收集所有玩家的骰子
+    const allPlayerDice = {};
+    for (const pid of this.playerOrder) {
+      allPlayerDice[pid] = this.players[pid].dice;
+    }
 
-    const result = GameEngine.resolveBid(
-      this.players[pidA].dice,
-      this.players[pidB].dice,
-      lastBid
-    );
+    const result = GameEngine.resolveBid(allPlayerDice, lastBid);
 
-    // 判定输赢
+    // 判定输赢（开的人 vs 上一位叫数者）
     let winner, loser;
     if (result.bidEstablished) {
       // 叫数成立 → 开的人输
       loser = openerPlayerId;
-      winner = this.getOpponent(openerPlayerId);
+      winner = lastBidder;
     } else {
       // 叫数不成立 → 叫的人输
       loser = lastBidder;
-      winner = this.getOpponent(lastBidder);
+      winner = openerPlayerId;
     }
 
     const score = GameEngine.calculateScore(resultType, multiplier);
@@ -446,6 +496,19 @@ class Room {
 
     this.phase = PHASE.SETTLING;
 
+    // 构建所有玩家骰子信息
+    const allDice = {};
+    const countDetails = {};
+    for (const pid of this.playerOrder) {
+      const playerResult = result.playerResults[pid];
+      allDice[pid] = {
+        dice: this.players[pid].dice,
+        nickname: this.players[pid].nickname,
+        pattern: playerResult ? playerResult.pattern : GameEngine.detectPattern(this.players[pid].dice)
+      };
+      countDetails[pid] = playerResult ? playerResult.count : 0;
+    }
+
     // 广播结算
     this.broadcast('game_settled', {
       type: 'open',
@@ -463,25 +526,15 @@ class Room {
       totalCount: result.totalCount,
       bidQuantity: result.bidQuantity,
       lastBid,
-      allDice: {
-        [pidA]: {
-          dice: this.players[pidA].dice,
-          nickname: this.players[pidA].nickname,
-          pattern: result.playerAResult.pattern
-        },
-        [pidB]: {
-          dice: this.players[pidB].dice,
-          nickname: this.players[pidB].nickname,
-          pattern: result.playerBResult.pattern
-        }
-      },
-      countDetails: {
-        [pidA]: result.playerAResult.count,
-        [pidB]: result.playerBResult.count
-      },
+      allDice,
+      countDetails,
       bids: this.currentGame.bids,
       stats: this.stats,
-      phase: this.phase
+      phase: this.phase,
+      playerOrder: this.playerOrder.map(id => ({
+        id,
+        nickname: this.players[id].nickname
+      }))
     });
 
     return { success: true };
@@ -497,14 +550,20 @@ class Room {
     }
     this.currentGame._playAgain.add(playerId);
 
-    const opId = this.getOpponent(playerId);
-    this.sendTo(opId, 'play_again_request', {
-      playerId,
-      nickname: this.players[playerId].nickname
-    });
+    // 通知其他所有人
+    for (const pid of this.playerOrder) {
+      if (pid !== playerId) {
+        this.sendTo(pid, 'play_again_request', {
+          playerId,
+          nickname: this.players[playerId].nickname,
+          readyCount: this.currentGame._playAgain.size,
+          totalPlayers: this.playerOrder.length
+        });
+      }
+    }
 
-    // 双方都确认
-    if (this.currentGame._playAgain.size === 2) {
+    // 所有人都确认
+    if (this.currentGame._playAgain.size === this.playerOrder.length) {
       this.startGame();
     }
   }
@@ -541,7 +600,16 @@ class Room {
       return;
     }
 
-    const winner = this.getOpponent(timeoutPlayer);
+    // 确定赢家：劈骰阶段是劈骰对手，叫数阶段选上一位叫数者或下一位
+    let winner;
+    if (this.phase === PHASE.CHALLENGING) {
+      const challenge = this.currentGame.challenge;
+      winner = (timeoutPlayer === challenge.initiator) ? challenge.target : challenge.initiator;
+    } else {
+      // 叫数阶段超时，上家赢（如果有），否则下一位
+      winner = this.currentGame.lastBidder || this.getNextPlayer(timeoutPlayer);
+    }
+
     const multiplier = this.currentGame.challenge ? this.currentGame.challenge.multiplier : 1;
     const score = multiplier;
 
@@ -555,6 +623,16 @@ class Room {
 
     this.phase = PHASE.SETTLING;
 
+    // 构建所有玩家骰子信息
+    const allDice = {};
+    for (const pid of this.playerOrder) {
+      allDice[pid] = {
+        dice: this.players[pid].dice,
+        nickname: this.players[pid].nickname,
+        pattern: GameEngine.detectPattern(this.players[pid].dice)
+      };
+    }
+
     this.broadcast('game_settled', {
       type: 'timeout',
       timeoutPlayer,
@@ -565,22 +643,15 @@ class Room {
       loserNickname: this.players[timeoutPlayer].nickname,
       multiplier,
       score,
-      allDice: {
-        [this.playerOrder[0]]: {
-          dice: this.players[this.playerOrder[0]].dice,
-          nickname: this.players[this.playerOrder[0]].nickname,
-          pattern: GameEngine.detectPattern(this.players[this.playerOrder[0]].dice)
-        },
-        [this.playerOrder[1]]: {
-          dice: this.players[this.playerOrder[1]].dice,
-          nickname: this.players[this.playerOrder[1]].nickname,
-          pattern: GameEngine.detectPattern(this.players[this.playerOrder[1]].dice)
-        }
-      },
+      allDice,
       lastBid: this.currentGame.lastBid,
       bids: this.currentGame.bids,
       stats: this.stats,
-      phase: this.phase
+      phase: this.phase,
+      playerOrder: this.playerOrder.map(id => ({
+        id,
+        nickname: this.players[id].nickname
+      }))
     });
   }
 
@@ -594,13 +665,15 @@ class Room {
     player.disconnectedAt = Date.now();
     player.ws = null;
 
-    // 通知对方
-    const opId = this.getOpponent(playerId);
-    if (opId) {
-      this.sendTo(opId, 'opponent_disconnected', {
-        nickname: player.nickname,
-        message: '对方网络异常，等待重连...'
-      });
+    // 通知其他所有人
+    for (const pid of this.playerOrder) {
+      if (pid !== playerId) {
+        this.sendTo(pid, 'opponent_disconnected', {
+          playerId,
+          nickname: player.nickname,
+          message: `${player.nickname} 网络异常，等待重连...`
+        });
+      }
     }
 
     // 30秒断线计时
@@ -623,12 +696,14 @@ class Room {
     player.disconnectedAt = null;
     player.ws = ws;
 
-    // 通知对方
-    const opId = this.getOpponent(playerId);
-    if (opId) {
-      this.sendTo(opId, 'opponent_reconnected', {
-        nickname: player.nickname
-      });
+    // 通知其他所有人
+    for (const pid of this.playerOrder) {
+      if (pid !== playerId) {
+        this.sendTo(pid, 'opponent_reconnected', {
+          playerId,
+          nickname: player.nickname
+        });
+      }
     }
 
     // 推送完整游戏状态
@@ -640,11 +715,20 @@ class Room {
     if (!this.players[playerId]) return;
     if (this.players[playerId].connected) return; // 已重连
 
-    const winner = this.getOpponent(playerId);
-    if (!winner) return;
-
     // 如果在游戏中，判断线方负
     if (this.phase === PHASE.BIDDING || this.phase === PHASE.CHALLENGING) {
+      // 确定赢家
+      let winner;
+      if (this.phase === PHASE.CHALLENGING) {
+        const challenge = this.currentGame.challenge;
+        winner = (playerId === challenge.initiator) ? challenge.target : challenge.initiator;
+      } else {
+        // 选一个在线的玩家作为赢家
+        winner = this.playerOrder.find(pid => pid !== playerId && this.players[pid].connected);
+      }
+
+      if (!winner) return;
+
       const multiplier = this.currentGame.challenge ? this.currentGame.challenge.multiplier : 1;
       const score = multiplier;
 
@@ -661,6 +745,10 @@ class Room {
 
     this.phase = PHASE.SETTLING;
 
+    // 找一个在线的赢家
+    const winner = this.playerOrder.find(pid => pid !== playerId && this.players[pid].connected);
+    if (!winner) return;
+
     this.broadcast('game_settled', {
       type: 'disconnect',
       disconnectedPlayer: playerId,
@@ -669,9 +757,13 @@ class Room {
       winnerNickname: this.players[winner].nickname,
       loser: playerId,
       loserNickname: this.players[playerId].nickname,
-      message: '对方已掉线，你赢了',
+      message: `${this.players[playerId].nickname} 已掉线`,
       stats: this.stats,
-      phase: this.phase
+      phase: this.phase,
+      playerOrder: this.playerOrder.map(id => ({
+        id,
+        nickname: this.players[id].nickname
+      }))
     });
   }
 
@@ -682,22 +774,34 @@ class Room {
     const state = {
       roomCode: this.roomCode,
       phase: this.phase,
+      maxPlayers: this.maxPlayers,
       you: {
         id: playerId,
         nickname: this.players[playerId].nickname,
         dice: this.players[playerId].dice
       },
-      stats: this.stats
+      stats: this.stats,
+      playerOrder: this.playerOrder.map(id => ({
+        id,
+        nickname: this.players[id].nickname,
+        connected: this.players[id].connected
+      }))
     };
 
-    const opId = this.getOpponent(playerId);
-    if (opId) {
+    // 兼容旧版 opponent 字段
+    const others = this.getOtherPlayers(playerId);
+    if (others.length === 1) {
       state.opponent = {
-        id: opId,
-        nickname: this.players[opId].nickname,
-        connected: this.players[opId].connected
+        id: others[0],
+        nickname: this.players[others[0]].nickname,
+        connected: this.players[others[0]].connected
       };
     }
+    state.others = others.map(opId => ({
+      id: opId,
+      nickname: this.players[opId].nickname,
+      connected: this.players[opId].connected
+    }));
 
     if (this.currentGame) {
       state.game = {
@@ -750,6 +854,7 @@ class Room {
     return {
       roomCode: this.roomCode,
       phase: this.phase,
+      maxPlayers: this.maxPlayers,
       players: this.playerOrder.map(pid => ({
         id: pid,
         nickname: this.players[pid].nickname,

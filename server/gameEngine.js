@@ -127,30 +127,32 @@ class GameEngine {
   }
 
   /**
-   * 开骰判定：统计双方骰子总数
-   * @param {number[]} diceA - 玩家A的骰子
-   * @param {number[]} diceB - 玩家B的骰子
+   * 开骰判定：统计所有玩家骰子总数（支持2-4人）
+   * @param {Object.<string, number[]>} allPlayerDice - { playerId: dice[] } 所有玩家的骰子
    * @param {object} lastBid - 最后的叫数 { quantity, value, mode }
    * @returns {{ 
    *   totalCount: number, 
    *   bidQuantity: number,
    *   bidEstablished: boolean,
-   *   playerAResult: object,
-   *   playerBResult: object 
+   *   playerResults: Object.<string, object>
    * }}
    */
-  static resolveBid(diceA, diceB, lastBid) {
+  static resolveBid(allPlayerDice, lastBid) {
     const { quantity, value, mode } = lastBid;
-    const resultA = this.countDice(diceA, value, mode);
-    const resultB = this.countDice(diceB, value, mode);
-    const totalCount = resultA.count + resultB.count;
+    const playerResults = {};
+    let totalCount = 0;
+
+    for (const [pid, dice] of Object.entries(allPlayerDice)) {
+      const result = this.countDice(dice, value, mode);
+      playerResults[pid] = result;
+      totalCount += result.count;
+    }
 
     return {
       totalCount,
       bidQuantity: quantity,
       bidEstablished: totalCount >= quantity,
-      playerAResult: resultA,
-      playerBResult: resultB
+      playerResults
     };
   }
 

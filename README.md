@@ -1,0 +1,206 @@
+# 🎲 大话骰 - 酒吧在线对战
+
+> 经典酒桌游戏线上版！支持 2-4 人在线对战，摇骰子、叫数、开骰，输了就得喝 🍺
+
+**当前版本：v2.0.0**
+
+---
+
+## 📦 技术栈
+
+| 技术 | 用途 |
+|------|------|
+| **Node.js** | 服务端运行时 |
+| **Express** | HTTP 服务、静态文件托管、路由 |
+| **WebSocket (ws)** | 实时多人对战通信 |
+| **UUID** | 玩家唯一标识生成 |
+| **原生 HTML/CSS/JS** | 前端（无框架，纯手写） |
+
+---
+
+## 📁 项目结构
+
+```
+liars-dice/
+├── package.json          # 项目配置和依赖
+├── package-lock.json     # 依赖锁定
+├── README.md             # 📌 本文件 - 项目说明
+├── RULES.md              # 📖 完整游戏规则
+│
+├── server/               # === 服务端 ===
+│   ├── index.js          # 服务入口：Express + WebSocket + 路由
+│   │                     #   - 静态文件托管（UTF-8 编码处理）
+│   │                     #   - /room/:roomCode 分享链接（动态 meta 标签）
+│   │                     #   - WebSocket 消息路由（create/join/bid/open/challenge...）
+│   │                     #   - 房间管理（创建/销毁/心跳检测）
+│   │
+│   ├── Room.js           # 房间状态机：游戏全生命周期管理
+│   │                     #   - 阶段：waiting → rolling → bidding → challenging → settling
+│   │                     #   - 功能：叫数、开骰、劈骰/反劈/认输、超时处理
+│   │                     #   - 断线重连（30秒超时）、房间倒计时（10分钟）
+│   │
+│   └── gameEngine.js     # 核心规则引擎（纯逻辑，无副作用）
+│                         #   - rollDice()：摇骰
+│                         #   - detectPattern()：牌型检测（单骰/豹子/纯豹）
+│                         #   - countDice()：骰子计数（飞/斋模式）
+│                         #   - validateBid()：叫数合法性验证
+│                         #   - resolveBid()：开骰判定
+│                         #   - calculateScore()：计分
+│
+├── public/               # === 前端 ===
+│   ├── index.html        # 页面结构（首页/等待/对局/结算/规则 5个页面）
+│   │                     #   - 社交分享 meta 标签（微信/QQ/微博卡片预览）
+│   │                     #   - 叫数选择器、劈骰操作区、弹幕容器
+│   │
+│   ├── game.js           # 前端全部逻辑
+│   │                     #   - WebSocket 连接与重连
+│   │                     #   - 消息处理（20+ 种消息类型）
+│   │                     #   - 页面切换与 UI 渲染
+│   │                     #   - 叫数选择器（智能合法性过滤）
+│   │                     #   - 骰子动画、弹幕系统、计时器
+│   │
+│   ├── style.css         # 全部样式（暗色主题、响应式、动画）
+│   └── og-image.svg      # 社交分享封面图
+```
+
+---
+
+## 🏗️ 架构概览
+
+```
+┌──────────────────┐     WebSocket      ┌──────────────────┐
+│   浏览器 (玩家A)  │◄──────────────────►│                  │
+│   game.js        │                    │   server/        │
+│   index.html     │                    │   index.js       │
+│   style.css      │                    │     ↓            │
+└──────────────────┘                    │   Room.js        │
+                                        │     ↓            │
+┌──────────────────┐     WebSocket      │   gameEngine.js  │
+│   浏览器 (玩家B)  │◄──────────────────►│                  │
+│   game.js        │                    └──────────────────┘
+│   index.html     │
+│   style.css      │
+└──────────────────┘
+```
+
+- **前后端通信**：纯 WebSocket，JSON 格式消息
+- **状态管理**：服务端为权威源（Room.js），前端仅做展示
+- **规则引擎**：gameEngine.js 是纯函数，方便测试和复用
+
+---
+
+## 🎮 核心功能
+
+- ✅ 2-4人在线实时对战
+- ✅ 创建房间时可选人数（2/3/4人）
+- ✅ 完整骰子规则（飞/斋、斋飞转换、豹子/纯豹/单骰）
+- ✅ 多人轮转叫数 → 开骰 → 结算完整流程
+- ✅ 劈骰系统（劈/反劈/认输，最多3次，倍数 ×2/×4/×8）
+- ✅ 30秒操作超时自动判负
+- ✅ 断线重连（30秒内自动恢复对局状态）
+- ✅ 房间分享（6位房间码 + 邀请链接）
+- ✅ 社交平台分享卡片（微信/QQ 预览优化）
+- ✅ 弹幕聊天
+- ✅ 欠杯数统计 + 连败彩蛋
+- ✅ 骰子摇动动画
+
+---
+
+## 🚀 本地开发
+
+```bash
+# 安装依赖
+npm install
+
+# 启动服务
+npm start
+# 或
+node server/index.js
+
+# 访问
+# http://localhost:3000
+```
+
+---
+
+## 📡 部署（生产环境）
+
+**服务器**：腾讯云轻量（159.75.107.189）
+**进程管理**：PM2
+
+```bash
+# 服务器上的部署流程
+cd /root/dice-drink
+git pull origin main
+pm2 restart dice-drink
+
+# 首次部署
+git clone <repo-url> /root/dice-drink
+cd /root/dice-drink
+npm install
+pm2 start server/index.js --name dice-drink
+pm2 save
+```
+
+**访问地址**：`http://159.75.107.189:3000`
+
+---
+
+## 📋 版本号规则
+
+| 版本变化 | 场景 | 举例 |
+|---------|------|------|
+| **x.y.Z**（补丁） | Bug 修复、小调整、文案修改 | 1.2.1 → 1.2.2 |
+| **x.Y.0**（功能） | 新功能上线 | 1.2.2 → 1.3.0 |
+| **X.0.0**（大版本） | 重大重构、多人模式等 | 1.3.0 → 2.0.0 |
+
+版本号显示在首页左下角，便于确认部署是否生效。
+
+---
+
+## 📝 版本历史
+
+| 版本 | 日期 | 变更内容 |
+|------|------|---------|
+| v2.0.0 | 2026-04-17 | **多人模式**：支持 2-4 人对战，创建房间可选人数，多人轮转叫数 |
+| v1.2.1 | 2026-04-17 | 添加 README 和 RULES 文档 |
+| v1.0.0 | — | 初始版本：基本双人对战功能 |
+
+---
+
+## 📌 WebSocket 消息协议
+
+### 客户端 → 服务端
+
+| 消息类型 | 说明 | 关键字段 |
+|---------|------|---------|
+| `create_room` | 创建房间 | `nickname`, `playerId`, `maxPlayers` |
+| `join_room` | 加入房间 | `roomCode`, `nickname`, `playerId` |
+| `bid` | 叫数 | `quantity`, `value`, `mode` |
+| `open` | 开骰 | — |
+| `challenge` | 劈骰 | — |
+| `challenge_open` | 被劈后开骰 | — |
+| `counter_challenge` | 反劈 | — |
+| `surrender` | 认输 | — |
+| `play_again` | 再来一局 | — |
+| `leave_room` | 离开房间 | — |
+| `chat` | 发送聊天 | `text` |
+| `reconnect` | 重连 | `playerId` |
+
+### 服务端 → 客户端
+
+| 消息类型 | 说明 |
+|---------|------|
+| `room_created` | 房间创建成功 |
+| `room_joined` | 加入房间成功 |
+| `player_info` | 所有玩家信息 |
+| `game_start` | 对局开始（含骰子） |
+| `bid_made` | 叫数广播 |
+| `challenge_started` | 劈骰开始 |
+| `counter_challenge` | 反劈 |
+| `game_settled` | 对局结算 |
+| `timer_start` | 倒计时开始 |
+| `chat_message` | 聊天消息 |
+| `opponent_disconnected` / `opponent_reconnected` | 对手断线/重连 |
+| `game_state` | 完整状态（重连用） |
+| `error` | 错误提示 |

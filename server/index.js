@@ -78,19 +78,19 @@ app.get('/room/:roomCode', (req, res) => {
     
     // 动态替换 meta 标签，让每个房间链接都有独特的预览信息
     html = html.replace(
-      '<meta property="og:title" content="🎲 菜就多练！摇把骰子！">',
+      '<meta property="og:title" content="🎲 大话骰 - 来战！">',
       `<meta property="og:title" content="🎲 菜就多练！房间号 ${roomCode}，来摇骰子！">`
     );
     html = html.replace(
-      '<meta property="og:description" content="酒吧大话骰在线版！摇骰子、叫数、开骰，输了就得喝 🍺">',
+      '<meta property="og:description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲 支持2-4人！">',
       `<meta property="og:description" content="朋友喊你来酒吧摇骰子！房间 ${roomCode}，输了就得喝 🍺">`
     );
     html = html.replace(
-      '<meta name="twitter:title" content="🎲 菜就多练！摇把骰子！">',
+      '<meta name="twitter:title" content="🎲 大话骰 - 来战！">',
       `<meta name="twitter:title" content="🎲 菜就多练！房间号 ${roomCode}，来摇骰子！">`
     );
     html = html.replace(
-      '<meta name="twitter:description" content="酒吧大话骰在线版！摇骰子、叫数、开骰，输了就得喝 🍺">',
+      '<meta name="twitter:description" content="邀请你来一局大话骰对战！摇骰子、叫数、开骰，经典酒桌游戏线上版 🎲 支持2-4人！">',
       `<meta name="twitter:description" content="朋友喊你来酒吧摇骰子！房间 ${roomCode}，输了就得喝 🍺">`
     );
     html = html.replace(
@@ -98,7 +98,7 @@ app.get('/room/:roomCode', (req, res) => {
       `<meta itemprop="name" content="🎲 菜就多练！房间号 ${roomCode}，来摇骰子！">`
     );
     html = html.replace(
-      '<meta itemprop="description" content="酒吧大话骰在线版！摇骰子、叫数、开骰，输了就得喝 🍺">',
+      '<meta itemprop="description" content="酒吧大话骰在线版！摇骰子、叫数、开骰，输了就得喝 🍺 2-4人对战！">',
       `<meta itemprop="description" content="朋友喊你来酒吧摇骰子！房间 ${roomCode}，输了就得喝 🍺">`
     );
     
@@ -199,8 +199,9 @@ wss.on('connection', (ws) => {
       case 'create_room': {
         playerId = data.playerId || uuidv4();
         const nickname = data.nickname || '玩家1';
+        const maxPlayers = Math.min(Math.max(parseInt(data.maxPlayers) || 2, 2), 4);
         const roomCode = generateRoomCode();
-        const room = new Room(roomCode, playerId);
+        const room = new Room(roomCode, playerId, maxPlayers);
         rooms[roomCode] = room;
         room.addPlayer(playerId, nickname, ws);
         playerRooms[playerId] = roomCode;
@@ -212,10 +213,11 @@ wss.on('connection', (ws) => {
             roomCode,
             playerId,
             nickname,
+            maxPlayers,
             roomInfo: room.getRoomInfo()
           }
         }));
-        console.log(`[Room] ${nickname} 创建房间 ${roomCode}`);
+        console.log(`[Room] ${nickname} 创建房间 ${roomCode}（${maxPlayers}人）`);
         break;
       }
 
@@ -275,8 +277,8 @@ wss.on('connection', (ws) => {
 
         console.log(`[Room] ${nickname} 加入房间 ${roomCode}`);
 
-        // 双人到齐，自动开始
-        if (room.playerOrder.length === 2) {
+        // 人满，自动开始
+        if (room.playerOrder.length === room.maxPlayers) {
           setTimeout(() => {
             room.startGame();
           }, 2000);
@@ -377,12 +379,15 @@ wss.on('connection', (ws) => {
         const room = rooms[currentRoomCode];
         if (!room) return;
 
-        const opId = room.getOpponent(playerId);
-        if (opId) {
-          room.sendTo(opId, 'opponent_left', {
-            nickname: room.players[playerId].nickname,
-            message: '对方已离开房间'
-          });
+        // 通知所有其他玩家
+        for (const pid of room.playerOrder) {
+          if (pid !== playerId) {
+            room.sendTo(pid, 'opponent_left', {
+              playerId,
+              nickname: room.players[playerId].nickname,
+              message: `${room.players[playerId].nickname} 已离开房间`
+            });
+          }
         }
 
         cleanupRoom(currentRoomCode);

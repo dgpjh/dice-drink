@@ -1,5 +1,5 @@
 /**
- * 大话骰 - 前端游戏逻辑
+ * 大话骰 - 前端游戏逻辑（支持2-4人）
  */
 
 // =============== 状态管理 ===============
@@ -13,6 +13,10 @@ const state = {
   maxReconnectAttempts: 15,
   reconnectTimer: null,
 
+  // 房间设置
+  maxPlayers: 2,
+  selectedMaxPlayers: 2,
+
   // 游戏状态
   phase: 'home',
   myDice: [],
@@ -22,7 +26,10 @@ const state = {
   currentTurn: null,
   challenge: null,
   stats: {},
-  opponent: null,
+
+  // 多人玩家信息
+  playerOrder: [],  // [{ id, nickname, connected }]
+  opponent: null,   // 兼容2人模式
 
   // 叫数选择器
   selectedQuantity: 1,
@@ -92,6 +99,26 @@ function sendMsg(type, data = {}) {
   }
 }
 
+// =============== 辅助函数 ===============
+
+/**
+ * 根据 playerId 获取玩家昵称
+ */
+function getPlayerName(pid) {
+  if (pid === state.playerId) return state.nickname;
+  const p = state.playerOrder.find(p => p.id === pid);
+  return p ? p.nickname : '???';
+}
+
+/**
+ * 获取当前操作者的昵称
+ */
+function getCurrentTurnName() {
+  if (!state.currentTurn) return '???';
+  if (state.currentTurn === state.playerId) return '你';
+  return getPlayerName(state.currentTurn);
+}
+
 // =============== 消息处理 ===============
 function handleMessage(msg) {
   const { type, data } = msg;
@@ -101,6 +128,7 @@ function handleMessage(msg) {
       state.playerId = data.playerId;
       state.roomCode = data.roomCode;
       state.nickname = data.nickname;
+      state.maxPlayers = data.maxPlayers || 2;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -109,6 +137,7 @@ function handleMessage(msg) {
       state.playerId = data.playerId;
       state.roomCode = data.roomCode;
       state.nickname = data.nickname;
+      state.maxPlayers = data.roomInfo?.maxPlayers || 2;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -116,9 +145,11 @@ function handleMessage(msg) {
     case 'player_info':
       state.opponent = data.opponent;
       state.stats = data.stats;
-      if (data.opponent) {
-        updateWaitingPlayerInfo(data);
+      if (data.playerOrder) {
+        state.playerOrder = data.playerOrder;
+        state.maxPlayers = data.maxPlayers || state.maxPlayers;
       }
+      updateWaitingPlayerList();
       break;
 
     case 'game_start':
@@ -130,6 +161,9 @@ function handleMessage(msg) {
       state.challenge = null;
       state.phase = 'game';
       state.stats = data.stats;
+      if (data.playerOrder) {
+        state.playerOrder = data.playerOrder;
+      }
       showGamePage(data);
       break;
 
@@ -147,7 +181,9 @@ function handleMessage(msg) {
       state.challenge = {
         multiplier: data.multiplier,
         count: data.count,
-        currentTurn: data.currentTurn
+        currentTurn: data.currentTurn,
+        challenger: data.challenger,
+        target: data.target
       };
       state.isMyTurn = data.currentTurn === state.playerId;
       state.phase = 'challenging';
@@ -160,7 +196,9 @@ function handleMessage(msg) {
         multiplier: data.multiplier,
         count: data.count,
         maxReached: data.maxReached,
-        currentTurn: data.currentTurn
+        currentTurn: data.currentTurn,
+        player: data.player,
+        target: data.target
       };
       state.isMyTurn = data.currentTurn === state.playerId;
       updateChallengeUI(data);
@@ -170,16 +208,18 @@ function handleMessage(msg) {
     case 'game_settled':
       state.phase = 'settlement';
       state.stats = data.stats;
+      if (data.playerOrder) {
+        state.playerOrder = data.playerOrder;
+      }
       clearTimer();
       showSettlementPage(data);
       break;
 
     case 'play_again_request':
-      showToast(`${data.nickname} 想再来一局！`, 'success');
-      // 高亮"再来一局"按钮，提示对方已准备
+      showToast(`${data.nickname} 想再来一局！（${data.readyCount}/${data.totalPlayers}）`, 'success');
       const playAgainBtn = document.getElementById('btn-play-again');
       playAgainBtn.disabled = false;
-      playAgainBtn.textContent = '🎲 对方已准备，点击开始！';
+      playAgainBtn.textContent = `🎲 ${data.readyCount}/${data.totalPlayers} 已准备，点击开始！`;
       playAgainBtn.classList.add('btn-glow');
       break;
 
@@ -246,7 +286,30 @@ function hideAllModals() {
 // =============== 首页操作 ===============
 let pendingAction = null;
 
+// 创建房间 → 先选人数
 document.getElementById('btn-create-room').addEventListener('click', () => {
+  state.selectedMaxPlayers = 2;
+  // 重置人数选择器
+  document.querySelectorAll('.count-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.count === '2');
+  });
+  document.getElementById('total-dice-hint').textContent = '场上共 10 颗骰子';
+  showModal('modal-create');
+});
+
+// 人数选择器
+document.getElementById('player-count-selector').addEventListener('click', (e) => {
+  const btn = e.target.closest('.count-btn');
+  if (!btn) return;
+  state.selectedMaxPlayers = parseInt(btn.dataset.count);
+  document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('total-dice-hint').textContent = `场上共 ${state.selectedMaxPlayers * 5} 颗骰子`;
+});
+
+// 确认创建 → 设置昵称
+document.getElementById('btn-confirm-create-room').addEventListener('click', () => {
+  hideModal('modal-create');
   pendingAction = 'create';
   document.getElementById('input-nickname').value = '';
   document.getElementById('nickname-action-area').innerHTML = `
@@ -258,8 +321,9 @@ document.getElementById('btn-create-room').addEventListener('click', () => {
   document.getElementById('btn-cancel-nickname').addEventListener('click', () => hideModal('modal-nickname'));
 });
 
+document.getElementById('btn-cancel-create').addEventListener('click', () => hideModal('modal-create'));
+
 document.getElementById('btn-join-room').addEventListener('click', () => {
-  // 检查 URL 里是否有房间码
   const urlRoom = getRoomCodeFromURL();
   if (urlRoom) {
     document.getElementById('input-room-code').value = urlRoom;
@@ -296,19 +360,19 @@ document.getElementById('btn-back-home').addEventListener('click', () => showPag
 function handleCreateRoom() {
   const nickname = document.getElementById('input-nickname').value.trim() || `玩家${Math.floor(Math.random() * 9000) + 1000}`;
   state.nickname = nickname;
+  state.maxPlayers = state.selectedMaxPlayers;
   hideAllModals();
 
   if (!state.connected) {
     connectWS();
-    // 等连接后再发
     const checkConnection = setInterval(() => {
       if (state.connected) {
         clearInterval(checkConnection);
-        sendMsg('create_room', { nickname, playerId: state.playerId });
+        sendMsg('create_room', { nickname, playerId: state.playerId, maxPlayers: state.maxPlayers });
       }
     }, 100);
   } else {
-    sendMsg('create_room', { nickname, playerId: state.playerId });
+    sendMsg('create_room', { nickname, playerId: state.playerId, maxPlayers: state.maxPlayers });
   }
 }
 
@@ -342,19 +406,43 @@ function showWaitingPage(data) {
     digits.appendChild(span);
   }
 
-  document.getElementById('waiting-player1').textContent = `${state.nickname}（你）`;
-  document.getElementById('waiting-player2').textContent = '等待中...';
+  // 如果有 roomInfo，更新玩家列表
+  if (data.roomInfo) {
+    state.maxPlayers = data.roomInfo.maxPlayers || 2;
+    state.playerOrder = data.roomInfo.players || [];
+  }
+
+  updateWaitingPlayerList();
 
   // 房间倒计时
   state.roomCreatedAt = Date.now();
   startRoomCountdown();
 }
 
-function updateWaitingPlayerInfo(data) {
-  if (data.opponent) {
-    document.getElementById('waiting-player2').textContent = data.opponent.nickname;
-    const statusEl = document.querySelector('.player-item.opponent .player-status');
-    if (statusEl) statusEl.textContent = '✅';
+function updateWaitingPlayerList() {
+  const container = document.getElementById('waiting-player-list');
+  container.innerHTML = '';
+
+  // 已加入的玩家
+  const players = state.playerOrder || [];
+  for (let i = 0; i < state.maxPlayers; i++) {
+    const div = document.createElement('div');
+    if (i < players.length) {
+      const p = players[i];
+      const isMe = p.id === state.playerId;
+      div.className = `player-item ${isMe ? 'you' : 'other'}`;
+      div.innerHTML = `
+        <span class="player-status">✅</span>
+        <span class="player-name">${p.nickname}${isMe ? '（你）' : ''}</span>
+      `;
+    } else {
+      div.className = 'player-item empty';
+      div.innerHTML = `
+        <span class="player-status">⏳</span>
+        <span class="player-name">等待中...</span>
+      `;
+    }
+    container.appendChild(div);
   }
 }
 
@@ -386,14 +474,13 @@ document.getElementById('btn-copy-code').addEventListener('click', () => {
 
 // 复制邀请链接
 document.getElementById('btn-copy-link').addEventListener('click', () => {
-  // 确保链接包含完整的协议、主机名和端口
   const protocol = location.protocol;
   const host = location.hostname;
   const port = location.port;
   const portPart = port ? `:${port}` : '';
   const link = `${protocol}//${host}${portPart}/room/${state.roomCode}`;
-  // 复制带引导文案的分享消息，而非裸链接
-  const shareText = `🎲 菜就多练！摇把骰子！\n房间号：${state.roomCode}\n点击链接直接加入👇\n${link}`;
+  const playerCount = state.maxPlayers > 2 ? `（${state.maxPlayers}人局）` : '';
+  const shareText = `🎲 菜就多练！摇把骰子！${playerCount}\n房间号：${state.roomCode}\n点击链接直接加入👇\n${link}`;
   copyToClipboard(shareText);
   showToast('邀请消息已复制，发给朋友吧！', 'success');
 });
@@ -409,15 +496,18 @@ function showGamePage(data) {
   showPage('game');
   clearRoomCountdown();
 
-  // 设置玩家名和得分
+  // 设置己方名和得分
   document.getElementById('game-my-name').textContent = state.nickname;
-  document.getElementById('game-opponent-name').textContent = state.opponent?.nickname || '对手';
   updateScoreDisplay();
+
+  // 渲染对手区域
+  renderOpponentsArea();
 
   // 显示摇骰动画，然后揭示骰子
   showDiceAnimation(() => {
     renderMyDice(data.yourDice);
-    renderOpponentDice(false);
+    // 对手骰子隐藏
+    renderAllOpponentDice(false);
     updateActionArea();
   });
 
@@ -431,8 +521,35 @@ function showGamePage(data) {
   updateSelectors();
 }
 
+/**
+ * 渲染对手区域（支持1-3个对手）
+ */
+function renderOpponentsArea() {
+  const container = document.getElementById('opponents-area');
+  container.innerHTML = '';
+
+  const opponents = state.playerOrder.filter(p => p.id !== state.playerId);
+
+  for (const op of opponents) {
+    const div = document.createElement('div');
+    div.className = 'opponent-area';
+    div.dataset.playerId = op.id;
+
+    const opStats = state.stats[op.id] || { totalScore: 0 };
+    div.innerHTML = `
+      <div class="player-header">
+        <span class="player-name">${op.nickname}</span>
+        <span class="player-score">🍺 欠杯：${opStats.totalScore}</span>
+      </div>
+      <div class="dice-row opponent-dice" id="opponent-dice-${op.id}">
+        ${Array(5).fill('<div class="die hidden">?</div>').join('')}
+      </div>
+    `;
+    container.appendChild(div);
+  }
+}
+
 function showDiceAnimation(callback) {
-  // 骰子摇动动画
   const myDiceEl = document.getElementById('my-dice');
   myDiceEl.innerHTML = '';
   for (let i = 0; i < 5; i++) {
@@ -460,20 +577,28 @@ function renderMyDice(dice) {
   }
 }
 
-function renderOpponentDice(revealed, dice) {
-  const container = document.getElementById('opponent-dice');
-  container.innerHTML = '';
-  for (let i = 0; i < 5; i++) {
-    const die = document.createElement('div');
-    if (revealed && dice) {
-      die.className = 'die revealed';
-      die.dataset.value = dice[i];
-      die.innerHTML = createDiceDots(dice[i]);
-    } else {
-      die.className = 'die hidden';
-      die.textContent = '?';
+/**
+ * 渲染所有对手的骰子（隐藏或揭示）
+ */
+function renderAllOpponentDice(revealed, allDice) {
+  const opponents = state.playerOrder.filter(p => p.id !== state.playerId);
+  for (const op of opponents) {
+    const container = document.getElementById(`opponent-dice-${op.id}`);
+    if (!container) continue;
+    container.innerHTML = '';
+    for (let i = 0; i < 5; i++) {
+      const die = document.createElement('div');
+      if (revealed && allDice && allDice[op.id]) {
+        const dice = allDice[op.id].dice || allDice[op.id];
+        die.className = 'die revealed';
+        die.dataset.value = dice[i];
+        die.innerHTML = createDiceDots(dice[i]);
+      } else {
+        die.className = 'die hidden';
+        die.textContent = '?';
+      }
+      container.appendChild(die);
     }
-    container.appendChild(die);
   }
 }
 
@@ -487,8 +612,6 @@ function getDiceEmoji(value) {
 
 /**
  * 创建骰子圆点 HTML
- * @param {number} value - 骰子点数 1-6
- * @returns {string} 包含圆点的 HTML
  */
 function createDiceDots(value) {
   const dotPositions = {
@@ -505,9 +628,18 @@ function createDiceDots(value) {
 
 function updateScoreDisplay() {
   const myStats = state.stats[state.playerId] || { totalScore: 0 };
-  const opStats = state.opponent ? (state.stats[state.opponent.id] || { totalScore: 0 }) : { totalScore: 0 };
   document.getElementById('game-my-score').textContent = `🍺 欠杯：${myStats.totalScore}`;
-  document.getElementById('game-opponent-score').textContent = `🍺 欠杯：${opStats.totalScore}`;
+
+  // 更新所有对手得分
+  const opponents = state.playerOrder.filter(p => p.id !== state.playerId);
+  for (const op of opponents) {
+    const opArea = document.querySelector(`.opponent-area[data-player-id="${op.id}"]`);
+    if (opArea) {
+      const scoreEl = opArea.querySelector('.player-score');
+      const opStats = state.stats[op.id] || { totalScore: 0 };
+      if (scoreEl) scoreEl.textContent = `🍺 欠杯：${opStats.totalScore}`;
+    }
+  }
 }
 
 function updateBidHistory(data) {
@@ -532,7 +664,7 @@ function updateBidHistory(data) {
     indicator.textContent = '← 轮到你了';
     indicator.style.color = 'var(--primary-light)';
   } else {
-    indicator.textContent = `← 等待 ${state.opponent?.nickname || '对方'} 操作`;
+    indicator.textContent = `← 等待 ${getCurrentTurnName()} 操作`;
     indicator.style.color = 'var(--text-muted)';
   }
 }
@@ -541,6 +673,7 @@ function updateActionArea() {
   const biddingArea = document.getElementById('action-bidding');
   const challengedArea = document.getElementById('action-challenged');
   const waitingArea = document.getElementById('action-waiting');
+  const waitingText = document.getElementById('waiting-text');
 
   if (state.phase === 'challenging') {
     if (state.isMyTurn) {
@@ -551,6 +684,7 @@ function updateActionArea() {
       biddingArea.style.display = 'none';
       challengedArea.style.display = 'none';
       waitingArea.style.display = 'block';
+      waitingText.textContent = `⚡ 等待劈骰结果...`;
     }
     return;
   }
@@ -568,48 +702,31 @@ function updateActionArea() {
     biddingArea.style.display = 'none';
     challengedArea.style.display = 'none';
     waitingArea.style.display = 'block';
+    waitingText.textContent = `🍺 等待 ${getCurrentTurnName()} 叫骰...`;
   }
 }
 
 // =============== 叫数选择器 ===============
 
-/**
- * 点数大小排序值：2<3<4<5<6<1（1最大）
- */
 function diceRank(value) {
-  if (value === 1) return 7; // 1是最大的
-  return value; // 2=2, 3=3, 4=4, 5=5, 6=6
+  if (value === 1) return 7;
+  return value;
 }
 
-/**
- * 比较两个点数大小，返回 true 如果 a > b（1最大，2最小）
- */
 function isValueGreater(a, b) {
   return diceRank(a) > diceRank(b);
 }
 
-/**
- * 获取按大小排序的所有点数（从小到大：2,3,4,5,6,1）
- */
 function getSortedValues() {
   return [2, 3, 4, 5, 6, 1];
 }
 
-/**
- * 计算当前选择下的最小合法数量
- * 规则：
- *  - 飞模式(value!=1): 最低3个
- *  - 斋模式(value!=1): 最低3个
- *  - 叫1点(斋): 最低2个
- *  - 如果有上家叫数，还需满足加码规则
- */
 function getMinQuantity(value, mode, lastBid) {
-  // 基础最低数量
   let baseMin;
   if (value === 1) {
-    baseMin = 2; // 叫1最低2个
+    baseMin = 2;
   } else {
-    baseMin = 3; // 飞或斋最低3个
+    baseMin = 3;
   }
 
   if (!lastBid) return baseMin;
@@ -620,18 +737,15 @@ function getMinQuantity(value, mode, lastBid) {
 
   let ruleMin;
   if (prev.mode === nextMode) {
-    // 同模式：数量>=prev.quantity，同数量时点数>prev.value
     if (isValueGreater(value, prev.value)) {
       ruleMin = prev.quantity;
     } else {
       ruleMin = prev.quantity + 1;
     }
   } else if (prev.mode === 'zhai' && nextMode === 'fly') {
-    // 斋→飞：数量 +2，无额外点数约束
     const minFlyQuantity = prev.quantity + 2;
     ruleMin = minFlyQuantity;
   } else if (prev.mode === 'fly' && nextMode === 'zhai') {
-    // 飞→斋：数量 -1，无额外点数约束
     const minZhaiQuantity = prev.quantity - 1;
     ruleMin = minZhaiQuantity;
   } else {
@@ -641,16 +755,12 @@ function getMinQuantity(value, mode, lastBid) {
   return Math.max(baseMin, ruleMin);
 }
 
-/**
- * 获取指定数量下可选的点数列表
- */
 function getAvailableValues(quantity, mode, lastBid) {
   const available = [];
   for (let v = 1; v <= 6; v++) {
     const testMode = (v === 1) ? 'zhai' : mode;
     const minQ = getMinQuantity(v, testMode, lastBid);
     if (quantity >= minQ) {
-      // 还需检查：同模式同数量时，点数需要>prev.value
       if (lastBid) {
         const prev = { ...lastBid };
         if (prev.value === 1) prev.mode = 'zhai';
@@ -664,17 +774,13 @@ function getAvailableValues(quantity, mode, lastBid) {
   return available;
 }
 
-/**
- * 获取指定数量和点数下可选的模式
- */
 function getAvailableModes(quantity, value, lastBid) {
-  if (value === 1) return ['zhai']; // 叫1只能斋
+  if (value === 1) return ['zhai'];
 
   const modes = [];
   for (const m of ['fly', 'zhai']) {
     const minQ = getMinQuantity(value, m, lastBid);
     if (quantity >= minQ) {
-      // 还需检查同模式同数量的点数约束
       if (lastBid) {
         const prev = { ...lastBid };
         if (prev.value === 1) prev.mode = 'zhai';
@@ -688,12 +794,8 @@ function getAvailableModes(quantity, value, lastBid) {
   return modes;
 }
 
-/**
- * 检查一个叫数组合是否完全合法
- */
 function isBidValid(quantity, value, mode, lastBid) {
   const testMode = (value === 1) ? 'zhai' : mode;
-  // 基本最低数量
   let baseMin = (value === 1) ? 2 : 3;
   if (quantity < baseMin) return false;
 
@@ -708,12 +810,10 @@ function isBidValid(quantity, value, mode, lastBid) {
     return false;
   }
   if (prev.mode === 'zhai' && testMode === 'fly') {
-    // 斋→飞：数量至少 prev.quantity * 2 - 1，无额外点数约束
     const minFlyQuantity = prev.quantity * 2 - 1;
     return quantity >= minFlyQuantity;
   }
   if (prev.mode === 'fly' && testMode === 'zhai') {
-    // 飞→斋：数量至少 ceil((prev.quantity + 1) / 2)，无额外点数约束
     const minZhaiQuantity = Math.ceil((prev.quantity + 1) / 2);
     return quantity >= minZhaiQuantity;
   }
@@ -723,30 +823,24 @@ function isBidValid(quantity, value, mode, lastBid) {
 function updateSelectors() {
   const lastBid = state.lastBid;
 
-  // 叫1默认斋
   if (state.selectedValue === 1) {
     state.selectedMode = 'zhai';
   }
 
-  // === 1. 计算当前模式和点数下的最小数量 ===
   const minQ = getMinQuantity(state.selectedValue, state.selectedMode, lastBid);
   const maxQ = 20;
 
-  // 调整数量到合法范围
   if (state.selectedQuantity < minQ) {
     state.selectedQuantity = minQ;
   }
 
-  // === 2. 更新数量显示 ===
   document.getElementById('quantity-value').textContent = state.selectedQuantity;
 
-  // 减号按钮：如果已经是最小值则禁用
   const downBtn = document.querySelector('#quantity-selector .sel-btn[data-dir="down"]');
   const upBtn = document.querySelector('#quantity-selector .sel-btn[data-dir="up"]');
   if (downBtn) downBtn.disabled = (state.selectedQuantity <= minQ);
   if (upBtn) upBtn.disabled = (state.selectedQuantity >= maxQ);
 
-  // === 3. 更新点数按钮状态 ===
   const availableValues = getAvailableValues(state.selectedQuantity, state.selectedMode, lastBid);
   document.querySelectorAll('.dice-val-btn').forEach(btn => {
     const val = parseInt(btn.dataset.val);
@@ -756,16 +850,13 @@ function updateSelectors() {
     btn.disabled = !isAvailable;
   });
 
-  // 如果当前选中的点数不在可用列表中，自动选择第一个可用的
   if (!availableValues.includes(state.selectedValue) && availableValues.length > 0) {
     state.selectedValue = availableValues[0];
     if (state.selectedValue === 1) state.selectedMode = 'zhai';
-    // 递归更新
     updateSelectors();
     return;
   }
 
-  // === 4. 更新模式按钮状态 ===
   const availableModes = getAvailableModes(state.selectedQuantity, state.selectedValue, lastBid);
   document.querySelectorAll('.mode-btn').forEach(btn => {
     const m = btn.dataset.mode;
@@ -775,14 +866,12 @@ function updateSelectors() {
     btn.disabled = !isAvailable;
   });
 
-  // 如果当前模式不可用，切换到可用的
   if (!availableModes.includes(state.selectedMode) && availableModes.length > 0) {
     state.selectedMode = availableModes[0];
     updateSelectors();
     return;
   }
 
-  // === 5. 叫数按钮是否可用 ===
   const bidValid = isBidValid(state.selectedQuantity, state.selectedValue, state.selectedMode, lastBid);
   document.getElementById('btn-bid').disabled = !bidValid;
 }
@@ -793,7 +882,7 @@ document.getElementById('quantity-selector').addEventListener('click', (e) => {
   if (!btn || btn.disabled) return;
   const minQ = getMinQuantity(state.selectedValue, state.selectedMode, state.lastBid);
   if (btn.dataset.dir === 'up') {
-    state.selectedQuantity = Math.min(14, state.selectedQuantity + 1);
+    state.selectedQuantity = Math.min(20, state.selectedQuantity + 1);
   } else {
     state.selectedQuantity = Math.max(minQ, state.selectedQuantity - 1);
   }
@@ -862,6 +951,7 @@ function showChallengeUI(data) {
     document.getElementById('action-bidding').style.display = 'none';
     document.getElementById('action-challenged').style.display = 'none';
     document.getElementById('action-waiting').style.display = 'block';
+    document.getElementById('waiting-text').textContent = `⚡ ${data.challengerNickname} 劈了 ${data.targetNickname}！`;
   }
 
   showToast(`⚡ ${data.challengerNickname} 劈了！倍数×${data.multiplier}`);
@@ -879,6 +969,7 @@ function updateChallengeUI(data) {
     document.getElementById('action-bidding').style.display = 'none';
     document.getElementById('action-challenged').style.display = 'none';
     document.getElementById('action-waiting').style.display = 'block';
+    document.getElementById('waiting-text').textContent = `⚡ ${data.playerNickname} 反劈！倍数×${data.multiplier}`;
   }
 
   showToast(`⚡ ${data.playerNickname} 反劈！倍数×${data.multiplier}`);
@@ -914,7 +1005,6 @@ function updateTimerDisplay() {
   const pct = (state.timerRemaining / 30) * 100;
   const text = `⏱ ${state.timerRemaining}秒`;
 
-  // 更新所有计时条
   ['timer-fill', 'timer-fill-challenge', 'timer-fill-waiting'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.width = `${pct}%`;
@@ -942,13 +1032,19 @@ function showSettlementPage(data) {
     titleEl.textContent = '🎲 开骰！';
   }
 
-  // 双方骰子
+  // 所有玩家骰子
   const diceArea = document.getElementById('settlement-dice-area');
   diceArea.innerHTML = '';
 
   if (data.allDice) {
-    for (const [pid, info] of Object.entries(data.allDice)) {
-      const playerName = info.nickname || (pid === state.playerId ? state.nickname : state.opponent?.nickname || '对手');
+    // 按 playerOrder 排序展示
+    const orderedPids = (data.playerOrder || state.playerOrder || []).map(p => p.id || p);
+    const displayPids = orderedPids.length > 0 ? orderedPids : Object.keys(data.allDice);
+
+    for (const pid of displayPids) {
+      const info = data.allDice[pid];
+      if (!info) continue;
+      const playerName = info.nickname || getPlayerName(pid);
       const isMe = pid === state.playerId;
 
       const div = document.createElement('div');
@@ -988,19 +1084,21 @@ function showSettlementPage(data) {
     const modeClass = data.lastBid.mode === 'fly' ? 'mode-tag-fly' : 'mode-tag-zhai';
     const modeTag = data.lastBid.value === 1 ? '' : `<span class="${modeClass}">${modeName}</span>`;
     
-    // 谁开了谁
-    const openerName = data.opener === state.playerId ? state.nickname + '（你）' : (data.openerNickname || state.opponent?.nickname || '对手');
-    const lastBidderName = data.lastBidder === state.playerId ? state.nickname + '（你）' : (data.lastBidderNickname || state.opponent?.nickname || '对手');
+    const openerName = data.opener === state.playerId ? state.nickname + '（你）' : (data.openerNickname || getPlayerName(data.opener));
+    const lastBidderName = data.lastBidder === state.playerId ? state.nickname + '（你）' : (data.lastBidderNickname || getPlayerName(data.lastBidder));
     
-    // 构建每位玩家的贡献详情
+    // 每位玩家的贡献详情
     let countDetailsHtml = '';
     if (data.countDetails) {
-      for (const [pid, count] of Object.entries(data.countDetails)) {
-        const name = pid === state.playerId ? state.nickname + '（你）' : (state.opponent?.nickname || '对手');
+      const orderedPids = (data.playerOrder || state.playerOrder || []).map(p => p.id || p);
+      const displayPids = orderedPids.length > 0 ? orderedPids : Object.keys(data.countDetails);
+      for (const pid of displayPids) {
+        if (data.countDetails[pid] === undefined) continue;
+        const name = pid === state.playerId ? state.nickname + '（你）' : getPlayerName(pid);
         countDetailsHtml += `
           <div class="detail-row">
             <span class="detail-label">${name}</span>
-            <span class="detail-value">贡献 ${count} 个 ${data.lastBid.value}</span>
+            <span class="detail-value">贡献 ${data.countDetails[pid]} 个 ${data.lastBid.value}</span>
           </div>
         `;
       }
@@ -1019,7 +1117,7 @@ function showSettlementPage(data) {
       ${countDetailsHtml}
       <div class="detail-row">
         <span class="detail-label">实际总数</span>
-        <span class="detail-value">${data.totalCount} 个 ${data.lastBid.value}</span>
+        <span class="detail-value">${data.totalCount} 个 ${data.lastBid.value}（${state.playerOrder.length}人×5骰）</span>
       </div>
       <div class="detail-row">
         <span class="detail-label">判定结果</span>
@@ -1027,10 +1125,11 @@ function showSettlementPage(data) {
       </div>
     `;
   } else if (data.type === 'surrender') {
+    const surrenderName = data.surrenderPlayer === state.playerId ? state.nickname + '（你）' : (data.surrenderNickname || getPlayerName(data.surrenderPlayer));
     detailsEl.innerHTML = `
       <div class="detail-row">
         <span class="detail-label">结算方式</span>
-        <span class="detail-value">${data.surrenderPlayer === state.playerId ? state.nickname + '（你）' : (data.surrenderNickname || '对手')} 认输（倍数 ×${data.multiplier}）</span>
+        <span class="detail-value">${surrenderName} 认输（倍数 ×${data.multiplier}）</span>
       </div>
     `;
   } else if (data.type === 'timeout') {
@@ -1052,7 +1151,6 @@ function showSettlementPage(data) {
   // 胜负结果
   const resultEl = document.getElementById('settlement-result');
   const isWinner = data.winner === state.playerId;
-  // 判断输家是否连输3把且欠杯数>=5
   const loserStats = data.stats && data.loser ? data.stats[data.loser] : null;
   const isRekt = loserStats && loserStats.streak >= 3 && loserStats.totalScore >= 5;
   let loseText = '😢 你输了';
@@ -1061,12 +1159,22 @@ function showSettlementPage(data) {
     if (!isWinner) {
       loseText = '🥴 菜就多练';
     } else {
-      winText = '🏆 你赢了！对面菜就多练';
+      winText = `🏆 你赢了！${data.loserNickname || '对面'}菜就多练`;
     }
   }
+
+  // 非参与者（多人模式中的旁观者）
+  const isInvolved = data.winner === state.playerId || data.loser === state.playerId;
+  let resultText;
+  if (isInvolved) {
+    resultText = isWinner ? winText : loseText;
+  } else {
+    resultText = `${data.winnerNickname || '???'} 赢了，${data.loserNickname || '???'} 输了`;
+  }
+
   resultEl.innerHTML = `
-    <div class="result-winner" style="color: ${isWinner ? 'var(--success)' : 'var(--danger)'}">
-      ${isWinner ? winText : loseText}
+    <div class="result-winner" style="color: ${isWinner ? 'var(--success)' : (isInvolved ? 'var(--danger)' : 'var(--text-secondary)')}">
+      ${resultText}
     </div>
     <div class="result-score">
       ${data.loserNickname || ''} 本局欠杯：+${data.score || 0} 杯${data.multiplier > 1 ? `（×${data.multiplier}倍）` : ''}
@@ -1083,8 +1191,12 @@ function showSettlementPage(data) {
   const statsEl = document.getElementById('settlement-stats');
   statsEl.innerHTML = '<div class="stats-title">🍻 今晚战绩</div>';
   if (data.stats) {
-    for (const [pid, stat] of Object.entries(data.stats)) {
-      const name = pid === state.playerId ? state.nickname : (state.opponent?.nickname || '对手');
+    const orderedPids = (data.playerOrder || state.playerOrder || []).map(p => p.id || p);
+    const displayPids = orderedPids.length > 0 ? orderedPids : Object.keys(data.stats);
+    for (const pid of displayPids) {
+      const stat = data.stats[pid];
+      if (!stat) continue;
+      const name = getPlayerName(pid);
       const isMe = pid === state.playerId;
       statsEl.innerHTML += `
         <div class="stats-row">
@@ -1099,9 +1211,10 @@ function showSettlementPage(data) {
 // 再来一局
 document.getElementById('btn-play-again').addEventListener('click', () => {
   sendMsg('play_again');
-  showToast('等对方续杯...');
+  const total = state.playerOrder.length;
+  showToast(`等其他人续杯...（1/${total}）`);
   document.getElementById('btn-play-again').disabled = true;
-  document.getElementById('btn-play-again').textContent = '等对方续杯...';
+  document.getElementById('btn-play-again').textContent = `等其他人续杯...（1/${total}）`;
 });
 
 // 退出
@@ -1109,6 +1222,7 @@ document.getElementById('btn-leave-game').addEventListener('click', () => {
   sendMsg('leave_room');
   state.roomCode = '';
   state.opponent = null;
+  state.playerOrder = [];
   state.bids = [];
   showPage('home');
 });
@@ -1119,6 +1233,11 @@ function handleGameStateRestore(data) {
   state.nickname = data.you.nickname;
   state.myDice = data.you.dice;
   state.stats = data.stats;
+  state.maxPlayers = data.maxPlayers || 2;
+
+  if (data.playerOrder) {
+    state.playerOrder = data.playerOrder;
+  }
 
   if (data.opponent) {
     state.opponent = data.opponent;
@@ -1132,17 +1251,17 @@ function handleGameStateRestore(data) {
   }
 
   if (data.phase === 'waiting') {
-    showWaitingPage({ roomCode: data.roomCode });
+    showWaitingPage({ roomCode: data.roomCode, roomInfo: { maxPlayers: data.maxPlayers, players: data.playerOrder } });
   } else if (data.phase === 'bidding' || data.phase === 'challenging') {
     state.isMyTurn = (data.game?.currentTurn === state.playerId) ||
                      (data.game?.challenge?.currentTurn === state.playerId);
     state.phase = data.phase === 'challenging' ? 'challenging' : 'game';
     showPage('game');
+    renderOpponentsArea();
     renderMyDice(data.you.dice);
-    renderOpponentDice(false);
+    renderAllOpponentDice(false);
     updateScoreDisplay();
     document.getElementById('game-my-name').textContent = state.nickname;
-    document.getElementById('game-opponent-name').textContent = state.opponent?.nickname || '对手';
 
     // 恢复叫数记录
     if (state.bids.length > 0) {
@@ -1153,13 +1272,14 @@ function handleGameStateRestore(data) {
     if (data.phase === 'challenging' && state.isMyTurn && data.game.challenge) {
       showChallengeUI({
         challengerNickname: '对方',
+        targetNickname: '你',
         multiplier: data.game.challenge.multiplier,
         count: data.game.challenge.count,
         currentTurn: data.game.challenge.currentTurn
       });
     }
   } else if (data.phase === 'settling') {
-    showSettlementPage({ type: 'reconnect', stats: data.stats });
+    showSettlementPage({ type: 'reconnect', stats: data.stats, playerOrder: data.playerOrder });
   }
 }
 
@@ -1234,9 +1354,6 @@ function sendChatMessage() {
   input.value = '';
 }
 
-/**
- * 显示弹幕
- */
 let danmakuLane = 0;
 function showDanmaku(data) {
   const container = document.getElementById('danmaku-container');
@@ -1247,7 +1364,6 @@ function showDanmaku(data) {
   item.className = `danmaku-item ${isMine ? 'mine' : 'theirs'}`;
   item.textContent = `${data.nickname}: ${data.text}`;
 
-  // 分配弹幕轨道（避免重叠）
   const laneHeight = 36;
   const maxLanes = Math.floor(200 / laneHeight);
   const lane = danmakuLane % maxLanes;
@@ -1257,7 +1373,6 @@ function showDanmaku(data) {
 
   container.appendChild(item);
 
-  // 动画结束后移除
   item.addEventListener('animationend', () => {
     item.remove();
   });
@@ -1271,7 +1386,6 @@ function init() {
   const roomCode = getRoomCodeFromURL();
   if (roomCode) {
     state.roomCode = roomCode;
-    // 直接弹出昵称设置然后加入
     pendingAction = 'join';
     document.getElementById('input-nickname').value = '';
     document.getElementById('nickname-action-area').innerHTML = `

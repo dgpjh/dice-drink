@@ -1050,20 +1050,7 @@ html, body {
   }
 }
 
-@media (max-height: 640px) {
-  .bid-history {
-    max-height: 100px;
-  }
-  .die {
-    width: 44px;
-    height: 44px;
-    padding: 5px;
-  }
-  .die .dot {
-    width: 8px;
-    height: 8px;
-  }
-}
+
 
 /* =============== 规则吸边按钮 =============== */
 .rules-float-btn {
@@ -1225,4 +1212,134 @@ html, body {
   from { right: -300px; opacity: 1; }
   85% { opacity: 1; }
   to { right: 110%; opacity: 0; }
+}
+
+/* =============== 创建房间 - 人数选择器 =============== */
+.player-count-selector {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.count-btn {
+  width: 72px;
+  height: 48px;
+  border: 2px solid var(--border);
+  background: var(--bg);
+  color: var(--text-secondary);
+  border-radius: var(--radius);
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.count-btn.active {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: white;
+  box-shadow: 0 0 12px rgba(108, 92, 231, 0.4);
+}
+
+.count-btn:hover:not(.active) {
+  border-color: var(--primary-light);
+  color: var(--text);
+}
+
+.total-dice-hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+/* =============== 等待房间 - 多人列表 =============== */
+.player-item.other {
+  border-color: var(--secondary);
+}
+
+.player-item.empty {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+/* =============== 多人对手区域 =============== */
+.opponents-area {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* 多人模式下对手区域更紧凑 */
+.opponents-area .opponent-area {
+  padding: 2px 0;
+}
+
+.opponents-area .player-header {
+  padding: 2px 0;
+}
+
+.opponents-area .player-header .player-name {
+  font-size: 13px;
+}
+
+.opponents-area .player-score {
+  font-size: 11px;
+}
+
+/* 多人模式下骰子更小 */
+.opponents-area .dice-row {
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.opponents-area .die {
+  width: 40px;
+  height: 40px;
+  padding: 4px;
+}
+
+.opponents-area .die .dot {
+  width: 7px;
+  height: 7px;
+}
+
+/* 3-4人时叫数记录区域更小 */
+@media (max-height: 750px) {
+  .bid-history {
+    max-height: 100px;
+    min-height: 60px;
+  }
+  .opponents-area .die {
+    width: 36px;
+    height: 36px;
+    padding: 3px;
+  }
+  .opponents-area .die .dot {
+    width: 6px;
+    height: 6px;
+  }
+}
+
+/* 非常矮的屏幕，进一步压缩 */
+@media (max-height: 640px) {
+  .opponents-area .die {
+    width: 32px;
+    height: 32px;
+    padding: 3px;
+  }
+  .opponents-area .die .dot {
+    width: 5px;
+    height: 5px;
+  }
+  .my-dice .die {
+    width: 44px;
+    height: 44px;
+    padding: 5px;
+  }
+  .my-dice .die .dot {
+    width: 8px;
+    height: 8px;
+  }
 }
