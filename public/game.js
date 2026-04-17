@@ -506,8 +506,8 @@ function createDiceDots(value) {
 function updateScoreDisplay() {
   const myStats = state.stats[state.playerId] || { totalScore: 0 };
   const opStats = state.opponent ? (state.stats[state.opponent.id] || { totalScore: 0 }) : { totalScore: 0 };
-  document.getElementById('game-my-score').textContent = `得分：${myStats.totalScore}`;
-  document.getElementById('game-opponent-score').textContent = `得分：${opStats.totalScore}`;
+  document.getElementById('game-my-score').textContent = `🍺 欠杯：${myStats.totalScore}`;
+  document.getElementById('game-opponent-score').textContent = `🍺 欠杯：${opStats.totalScore}`;
 }
 
 function updateBidHistory(data) {
@@ -627,17 +627,13 @@ function getMinQuantity(value, mode, lastBid) {
       ruleMin = prev.quantity + 1;
     }
   } else if (prev.mode === 'zhai' && nextMode === 'fly') {
-    // 斋→飞：跨模式只需满足数量或点数其中一个条件
-    // 最低数量：如果点数更大，可以同数量；否则需要数量+1
-    if (isValueGreater(value, prev.value)) {
-      ruleMin = prev.quantity;
-    } else {
-      ruleMin = prev.quantity + 1;
-    }
+    // 斋→飞：数量 +2，无额外点数约束
+    const minFlyQuantity = prev.quantity + 2;
+    ruleMin = minFlyQuantity;
   } else if (prev.mode === 'fly' && nextMode === 'zhai') {
-    // 飞→斋：跨模式切换，允许数量减少
-    // 最低就是 baseMin（基础最低值）
-    ruleMin = baseMin;
+    // 飞→斋：数量 -1，无额外点数约束
+    const minZhaiQuantity = prev.quantity - 1;
+    ruleMin = minZhaiQuantity;
   } else {
     ruleMin = baseMin;
   }
@@ -712,14 +708,14 @@ function isBidValid(quantity, value, mode, lastBid) {
     return false;
   }
   if (prev.mode === 'zhai' && testMode === 'fly') {
-    // 斋→飞：数量更大，或同数量点数更大
-    if (quantity > prev.quantity) return true;
-    if (quantity === prev.quantity && isValueGreater(value, prev.value)) return true;
-    return false;
+    // 斋→飞：数量至少 prev.quantity * 2 - 1，无额外点数约束
+    const minFlyQuantity = prev.quantity * 2 - 1;
+    return quantity >= minFlyQuantity;
   }
   if (prev.mode === 'fly' && testMode === 'zhai') {
-    // 飞→斋：允许数量减少，只要不低于基础最低值就行
-    return quantity >= baseMin;
+    // 飞→斋：数量至少 ceil((prev.quantity + 1) / 2)，无额外点数约束
+    const minZhaiQuantity = Math.ceil((prev.quantity + 1) / 2);
+    return quantity >= minZhaiQuantity;
   }
   return false;
 }
@@ -992,6 +988,10 @@ function showSettlementPage(data) {
     const modeClass = data.lastBid.mode === 'fly' ? 'mode-tag-fly' : 'mode-tag-zhai';
     const modeTag = data.lastBid.value === 1 ? '' : `<span class="${modeClass}">${modeName}</span>`;
     
+    // 谁开了谁
+    const openerName = data.opener === state.playerId ? state.nickname + '（你）' : (data.openerNickname || state.opponent?.nickname || '对手');
+    const lastBidderName = data.lastBidder === state.playerId ? state.nickname + '（你）' : (data.lastBidderNickname || state.opponent?.nickname || '对手');
+    
     // 构建每位玩家的贡献详情
     let countDetailsHtml = '';
     if (data.countDetails) {
@@ -1008,8 +1008,12 @@ function showSettlementPage(data) {
     
     detailsEl.innerHTML = `
       <div class="detail-row">
+        <span class="detail-label">开骰方</span>
+        <span class="detail-value" style="color: var(--danger)">${openerName} 开了 ${lastBidderName}</span>
+      </div>
+      <div class="detail-row">
         <span class="detail-label">最后叫骰</span>
-        <span class="detail-value">${data.lastBid.quantity}个${data.lastBid.value} ${modeTag}</span>
+        <span class="detail-value">${lastBidderName}：${data.lastBid.quantity}个${data.lastBid.value} ${modeTag}</span>
       </div>
       ${data.multiplier > 1 ? `<div class="detail-row"><span class="detail-label">劈骰倍数</span><span class="detail-value">×${data.multiplier}</span></div>` : ''}
       ${countDetailsHtml}
@@ -1026,7 +1030,7 @@ function showSettlementPage(data) {
     detailsEl.innerHTML = `
       <div class="detail-row">
         <span class="detail-label">结算方式</span>
-        <span class="detail-value">认输（倍数 ×${data.multiplier}）</span>
+        <span class="detail-value">${data.surrenderPlayer === state.playerId ? state.nickname + '（你）' : (data.surrenderNickname || '对手')} 认输（倍数 ×${data.multiplier}）</span>
       </div>
     `;
   } else if (data.type === 'timeout') {

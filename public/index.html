@@ -53,7 +53,7 @@
             游戏规则
           </button>
         </div>
-        <div class="version-info">v1.2.0</div>
+        <div class="version-info">v1.2.1</div>
       </div>
     </div>
 
@@ -113,7 +113,7 @@
           <div class="rule-item"><span class="rule-icon">🎯</span><span class="rule-text"><strong>单骰</strong>（5颗全不同）→ 骰子算 <em>0</em></span></div>
           <div class="rule-item"><span class="rule-icon">🐆</span><span class="rule-text"><strong>豹子</strong>（含1凑5同）→ 该点数算 <em>6</em> 个</span></div>
           <div class="rule-item"><span class="rule-icon">👑</span><span class="rule-text"><strong>纯豹</strong>（5颗全同）→ 该点数算 <em>7</em> 个</span></div>
-          <div class="rule-item"><span class="rule-icon">🔄</span><span class="rule-text"><strong>斋→飞</strong> 数量或点数更大，<strong>飞→斋</strong> 自由切换</span></div>
+          <div class="rule-item"><span class="rule-icon">🔄</span><span class="rule-text"><strong>斋→飞</strong> 数量+2，<strong>飞→斋</strong> 数量-1</span></div>
           <div class="rule-item"><span class="rule-icon">⚡</span><span class="rule-text"><strong>劈骰</strong> 倍数翻倍喝更多，<strong>认输</strong> 喝一半</span></div>
         </div>
         <button class="btn btn-primary" id="btn-close-rules-quick">知道了</button>
@@ -288,8 +288,8 @@
           <h3>加码规则</h3>
           <ul>
             <li>同模式：数量更大，或同数量点数更大</li>
-            <li>斋→飞：数量更大，或同数量时点数更大</li>
-            <li>飞→斋：可自由切换（数量不低于起叫值即可）</li>
+            <li>斋→飞：数量+2（如3个3斋→至少5个X飞）</li>
+            <li>飞→斋：数量-1（如6个3飞→至少5个X斋）</li>
           </ul>
 
           <h3>特殊牌型</h3>

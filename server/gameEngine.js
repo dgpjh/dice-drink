@@ -214,41 +214,28 @@ class GameEngine {
     }
 
     // 跨模式：斋→飞
-    // 只需满足数量或点数其中一个条件：数量更大，或点数更大
-    // 但数量不能低于基础最低值
+    // 规则：数量 +2，无额外点数约束
     if (prev.mode === 'zhai' && next.mode === 'fly') {
-      if (next.quantity > prev.quantity) {
+      const minFlyQuantity = prev.quantity + 2;
+      if (next.quantity >= minFlyQuantity) {
         return { valid: true, reason: '' };
       }
-      if (next.quantity === prev.quantity && this.diceRank(next.value) > this.diceRank(prev.value)) {
-        return { valid: true, reason: '' };
-      }
-      // 允许数量少但点数更大（比如 3个5斋 → 3个6飞）
-      // 也允许数量多但点数更小（比如 3个5斋 → 5个2飞）
-      // 总之只要满足一个条件：数量>prev 或 (数量==prev 且 点数>prev)
       return {
         valid: false,
-        reason: `斋转飞需要数量更大，或同数量时点数更大`
+        reason: `斋转飞需要数量至少${minFlyQuantity}个`
       };
     }
 
     // 跨模式：飞→斋
-    // 只需满足数量或点数其中一个条件：数量更大，或点数更大
-    // 但数量不能低于基础最低值
+    // 规则：数量 -1，无额外点数约束
     if (prev.mode === 'fly' && next.mode === 'zhai') {
-      if (next.quantity > prev.quantity) {
-        return { valid: true, reason: '' };
-      }
-      if (next.quantity === prev.quantity && this.diceRank(next.value) > this.diceRank(prev.value)) {
-        return { valid: true, reason: '' };
-      }
-      // 允许数量减少（比如 5个4飞 → 4个2斋）
-      if (next.quantity < prev.quantity) {
+      const minZhaiQuantity = prev.quantity - 1;
+      if (next.quantity >= minZhaiQuantity) {
         return { valid: true, reason: '' };
       }
       return {
         valid: false,
-        reason: `飞转斋需要满足数量或点数的条件`
+        reason: `飞转斋需要数量至少${minZhaiQuantity}个`
       };
     }
 
