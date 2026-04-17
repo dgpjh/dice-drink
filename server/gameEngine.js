@@ -13,6 +13,23 @@ class GameEngine {
   }
 
   /**
+   * 根据玩家人数获取起叫限制
+   * 2人: 飞起叫3个, 斋起叫3个, 1点起叫2个
+   * 3人: 飞起叫5个, 斋起叫4个, 1点起叫3个
+   * 4人: 飞起叫7个, 斋起叫5个, 1点起叫4个
+   * @param {number} playerCount - 玩家人数 (2-4)
+   * @returns {{ fly: number, zhai: number, one: number }}
+   */
+  static getMinBidByPlayerCount(playerCount) {
+    const rules = {
+      2: { fly: 3, zhai: 3, one: 2 },
+      3: { fly: 5, zhai: 4, one: 3 },
+      4: { fly: 7, zhai: 5, one: 4 }
+    };
+    return rules[playerCount] || rules[2];
+  }
+
+  /**
    * 生成随机骰子
    * @param {number} count - 骰子数量
    * @returns {number[]} 骰子数组
@@ -160,9 +177,10 @@ class GameEngine {
    * 验证叫数是否合法（是否比上一次叫数更大）
    * @param {object|null} prevBid - 上一次叫数 { quantity, value, mode }
    * @param {object} newBid - 新的叫数 { quantity, value, mode }
+   * @param {number} [playerCount=2] - 玩家人数（2-4），用于确定起叫限制
    * @returns {{ valid: boolean, reason: string }}
    */
-  static validateBid(prevBid, newBid) {
+  static validateBid(prevBid, newBid, playerCount = 2) {
     // 叫1点时必须是斋
     if (newBid.value === 1 && newBid.mode === 'fly') {
       return { valid: false, reason: '叫1点时必须是斋模式' };
@@ -176,16 +194,22 @@ class GameEngine {
       return { valid: false, reason: '点数必须在1-6之间' };
     }
 
+    // 根据人数获取起叫限制
+    const minBid = this.getMinBidByPlayerCount(playerCount);
+
     // 最低起叫数量限制
     if (newBid.value === 1) {
-      // 叫1点（斋）最低2个
-      if (newBid.quantity < 2) {
-        return { valid: false, reason: '叫1点最少2个起' };
+      if (newBid.quantity < minBid.one) {
+        return { valid: false, reason: `叫1点最少${minBid.one}个起` };
+      }
+    } else if (newBid.mode === 'zhai') {
+      if (newBid.quantity < minBid.zhai) {
+        return { valid: false, reason: `斋模式最少${minBid.zhai}个起` };
       }
     } else {
-      // 飞或斋最低3个
-      if (newBid.quantity < 3) {
-        return { valid: false, reason: '叫数最少3个起（叫1点最少2个起）' };
+      // 飞模式
+      if (newBid.quantity < minBid.fly) {
+        return { valid: false, reason: `飞模式最少${minBid.fly}个起` };
       }
     }
 

@@ -235,6 +235,7 @@ function executeBotAction(roomCode, botPlayerId) {
     lastBid: room.currentGame?.lastBid || null,
     bids: room.currentGame?.bids || [],
     totalDice: room.playerOrder.length * 5,
+    playerCount: room.playerOrder.length,
     phase: room.phase,
     challenge: room.currentGame?.challenge || null
   };

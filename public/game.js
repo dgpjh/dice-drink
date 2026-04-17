@@ -17,6 +17,9 @@ const state = {
   maxPlayers: 2,
   selectedMaxPlayers: 2,
 
+  // 起叫规则（根据人数动态设置）
+  minBidRules: { fly: 3, zhai: 3, one: 2 },
+
   // 游戏状态
   phase: 'home',
   myDice: [],
@@ -114,6 +117,21 @@ function sendMsg(type, data = {}) {
 // =============== 辅助函数 ===============
 
 /**
+ * 根据玩家人数更新起叫规则
+ * 2人: 飞3个, 斋3个, 1点2个
+ * 3人: 飞5个, 斋4个, 1点3个
+ * 4人: 飞7个, 斋5个, 1点4个
+ */
+function updateMinBidRules(playerCount) {
+  const rules = {
+    2: { fly: 3, zhai: 3, one: 2 },
+    3: { fly: 5, zhai: 4, one: 3 },
+    4: { fly: 7, zhai: 5, one: 4 }
+  };
+  state.minBidRules = rules[playerCount] || rules[2];
+}
+
+/**
  * 根据 playerId 获取玩家昵称
  */
 function getPlayerName(pid) {
@@ -160,6 +178,8 @@ function handleMessage(msg) {
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
         state.maxPlayers = data.maxPlayers || state.maxPlayers;
+        // 根据实际人数更新起叫规则
+        updateMinBidRules(data.playerOrder.length);
       }
       updateWaitingPlayerList();
       break;
@@ -175,6 +195,9 @@ function handleMessage(msg) {
       state.stats = data.stats;
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
+      }
+      if (data.minBidRules) {
+        state.minBidRules = data.minBidRules;
       }
       showGamePage(data);
       break;
@@ -564,7 +587,7 @@ function showGamePage(data) {
   document.getElementById('bid-list').innerHTML = '';
 
   // 重置选择器到合法初始值
-  state.selectedQuantity = 3;
+  state.selectedQuantity = state.minBidRules.fly;
   state.selectedValue = 2;
   state.selectedMode = 'fly';
   updateSelectors();
@@ -771,11 +794,15 @@ function getSortedValues() {
 }
 
 function getMinQuantity(value, mode, lastBid) {
+  // 使用根据人数动态设置的起叫规则
+  const rules = state.minBidRules;
   let baseMin;
   if (value === 1) {
-    baseMin = 2;
+    baseMin = rules.one;
+  } else if (mode === 'zhai') {
+    baseMin = rules.zhai;
   } else {
-    baseMin = 3;
+    baseMin = rules.fly;
   }
 
   if (!lastBid) return baseMin;
@@ -845,7 +872,15 @@ function getAvailableModes(quantity, value, lastBid) {
 
 function isBidValid(quantity, value, mode, lastBid) {
   const testMode = (value === 1) ? 'zhai' : mode;
-  let baseMin = (value === 1) ? 2 : 3;
+  const rules = state.minBidRules;
+  let baseMin;
+  if (value === 1) {
+    baseMin = rules.one;
+  } else if (testMode === 'zhai') {
+    baseMin = rules.zhai;
+  } else {
+    baseMin = rules.fly;
+  }
   if (quantity < baseMin) return false;
 
   if (!lastBid) return true;

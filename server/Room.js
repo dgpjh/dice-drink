@@ -199,7 +199,8 @@ class Room {
           id,
           nickname: this.players[id].nickname
         })),
-        totalDice: this.playerOrder.length * 5
+        totalDice: this.playerOrder.length * 5,
+        minBidRules: GameEngine.getMinBidByPlayerCount(this.playerOrder.length)
       });
     }
 
@@ -223,8 +224,8 @@ class Room {
       bid.mode = 'zhai';
     }
 
-    // 验证叫数合法性
-    const validation = GameEngine.validateBid(this.currentGame.lastBid, bid);
+    // 验证叫数合法性（传入玩家人数）
+    const validation = GameEngine.validateBid(this.currentGame.lastBid, bid, this.playerOrder.length);
     if (!validation.valid) {
       return { success: false, reason: validation.reason };
     }

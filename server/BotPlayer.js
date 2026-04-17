@@ -37,6 +37,7 @@ class BotPlayer {
    *   - lastBid: { quantity, value, mode } | null 上一次叫数
    *   - bids: array 所有叫数历史
    *   - totalDice: number 场上总骰子数
+   *   - playerCount: number 玩家人数
    *   - phase: 'bidding' | 'challenging'
    *   - challenge: object | null 劈骰信息
    * @returns {{ action: string, data?: object }}
@@ -55,11 +56,11 @@ class BotPlayer {
    * 叫数阶段决策
    */
   decideBidding(context) {
-    const { myDice, lastBid, totalDice } = context;
+    const { myDice, lastBid, totalDice, playerCount } = context;
 
     // 第一次叫数
     if (!lastBid) {
-      return { action: 'bid', data: this.makeFirstBid(myDice, totalDice) };
+      return { action: 'bid', data: this.makeFirstBid(myDice, totalDice, playerCount) };
     }
 
     // 分析上家叫数的可信度
@@ -83,7 +84,7 @@ class BotPlayer {
     }
 
     // 尝试继续叫数
-    const nextBid = this.makeNextBid(myDice, lastBid, totalDice);
+    const nextBid = this.makeNextBid(myDice, lastBid, totalDice, playerCount);
     if (nextBid) {
       return { action: 'bid', data: nextBid };
     }
@@ -175,12 +176,15 @@ class BotPlayer {
   /**
    * 第一次叫数
    */
-  makeFirstBid(myDice, totalDice) {
+  makeFirstBid(myDice, totalDice, playerCount) {
     // 统计自己骰子
     const counts = {};
     for (const d of myDice) {
       counts[d] = (counts[d] || 0) + 1;
     }
+
+    // 获取起叫规则
+    const minBid = GameEngine.getMinBidByPlayerCount(playerCount || 2);
 
     // 找自己最多的点数（优先非1）
     let bestValue = 2;
@@ -201,10 +205,10 @@ class BotPlayer {
     const otherDice = totalDice - 5;
     const expectedOthers = Math.floor(otherDice * 2 / 6); // 飞模式期望
 
-    let quantity = Math.max(3, myTotal + Math.floor(expectedOthers * 0.5));
+    let quantity = Math.max(minBid.fly, myTotal + Math.floor(expectedOthers * 0.5));
     // 加一点随机性
     quantity += (Math.random() < 0.3 ? 1 : 0);
-    quantity = Math.max(3, Math.min(quantity, totalDice));
+    quantity = Math.max(minBid.fly, Math.min(quantity, totalDice));
 
     return {
       quantity,
@@ -216,13 +220,14 @@ class BotPlayer {
   /**
    * 继续叫数（比上一次更大）
    */
-  makeNextBid(myDice, lastBid, totalDice) {
+  makeNextBid(myDice, lastBid, totalDice, playerCount) {
     const counts = {};
     for (const d of myDice) {
       counts[d] = (counts[d] || 0) + 1;
     }
 
     const onesCount = counts[1] || 0;
+    const pc = playerCount || 2;
 
     // 策略1: 同模式加数量
     const candidates = [];
@@ -234,7 +239,10 @@ class BotPlayer {
       mode: lastBid.mode
     };
     if (this.isBidReasonable(myDice, sameModeBid, totalDice)) {
-      candidates.push(sameModeBid);
+      const validation = GameEngine.validateBid(lastBid, sameModeBid, pc);
+      if (validation.valid) {
+        candidates.push(sameModeBid);
+      }
     }
 
     // 尝试同数量更大点数
@@ -246,7 +254,7 @@ class BotPlayer {
           value: v,
           mode: v === 1 ? 'zhai' : lastBid.mode
         };
-        const validation = GameEngine.validateBid(lastBid, bid);
+        const validation = GameEngine.validateBid(lastBid, bid, pc);
         if (validation.valid && this.isBidReasonable(myDice, bid, totalDice)) {
           candidates.push(bid);
         }
@@ -262,7 +270,7 @@ class BotPlayer {
           value: v,
           mode: 'fly'
         };
-        const validation = GameEngine.validateBid(lastBid, bid);
+        const validation = GameEngine.validateBid(lastBid, bid, pc);
         if (validation.valid && this.isBidReasonable(myDice, bid, totalDice)) {
           candidates.push(bid);
         }
