@@ -112,20 +112,23 @@ class GameEngine {
       return { count: 0, pattern };
     }
 
-    // 豹子
+    // 豹子（含1凑5同，如 1-1-1-3-3）
     if (pattern.type === 'leopard') {
+      // 叫豹子的点数 → 触发特殊加成，算6个
       if (pattern.detail.value === targetValue) {
         return { count: 6, pattern };
       }
-      // 豹子是由1凑成的，如果目标不是豹子的点数
-      // 飞模式下1当万能，但豹子的特殊计数只对匹配的点数生效
-      if (mode === 'fly' && targetValue !== 1) {
-        // 豹子内的1已经被用来凑豹子了，不重复统计
-        // 但目标点数可能在骰子中有其他出现
-        // 实际上豹子只有一种点数+1组成，所以不会有其他点数
-        return { count: 0, pattern };
+      // 叫其他点数时，豹子加成不触发，回归普通癞子规则
+      const counts = {};
+      for (const d of dice) {
+        counts[d] = (counts[d] || 0) + 1;
       }
-      return { count: 0, pattern };
+      let total = counts[targetValue] || 0;
+      // 飞模式下，1当万能（除非目标就是1）
+      if (mode === 'fly' && targetValue !== 1) {
+        total += (counts[1] || 0);
+      }
+      return { count: total, pattern };
     }
 
     // 普通牌型：正常统计
