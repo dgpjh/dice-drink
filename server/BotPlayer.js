@@ -4,7 +4,21 @@
  */
 const GameEngine = require('./gameEngine');
 
-const BOT_NAMES = ['骰神', '赌侠', '老千', '酒鬼', '骰霸', '千王', '牛哥', '赌仙'];
+// 知名德州扑克选手昵称（按传奇程度排序）
+const BOT_NAMES = [
+  'Doyle',      // Doyle Brunson - 扑克教父，两届 WSOP 主赛冠军
+  'Phil',       // Phil Ivey - 被誉为当代最强牌手
+  'Hellmuth',   // Phil Hellmuth - 17 条 WSOP 金手链记录保持者
+  'Negreanu',   // Daniel Negreanu - 最会读牌的加拿大人
+  'Moneymaker', // Chris Moneymaker - 2003 WSOP 冠军，引爆扑克热潮
+  'Dwan',       // Tom Dwan (durrrr) - 网络扑克传奇
+  'Antonius',   // Patrik Antonius - 北欧高额桌之王
+  'Isildur',    // Viktor Blom (Isildur1) - 瑞典神秘高手
+  'Galfond',    // Phil Galfond - PLO 之神
+  'Selbst',     // Vanessa Selbst - 女子扑克一姐
+  'Polk',       // Doug Polk - 单挑 NL 之王
+  'Jungleman',  // Dan Cates - 高额现金桌杀手
+];
 
 class BotPlayer {
   /**

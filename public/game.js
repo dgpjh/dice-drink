@@ -210,6 +210,7 @@ function handleMessage(msg) {
       updateBidHistory(data);
       updateActionArea();
       resetTimer();
+      if (window.Sound) window.Sound.bid();
       break;
 
     case 'challenge_started':
@@ -224,6 +225,7 @@ function handleMessage(msg) {
       state.phase = 'challenging';
       showChallengeUI(data);
       resetTimer();
+      if (window.Sound) window.Sound.challenge();
       break;
 
     case 'counter_challenge':
@@ -238,6 +240,7 @@ function handleMessage(msg) {
       state.isMyTurn = data.currentTurn === state.playerId;
       updateChallengeUI(data);
       resetTimer();
+      if (window.Sound) window.Sound.counter();
       break;
 
     case 'game_settled':
@@ -248,6 +251,16 @@ function handleMessage(msg) {
       }
       clearTimer();
       showSettlementPage(data);
+      if (window.Sound) {
+        // 先开骰声，再根据胜负响胜负音
+        window.Sound.open();
+        const isWinner = data.winner === state.playerId;
+        const isLoser = data.loser === state.playerId;
+        setTimeout(() => {
+          if (isWinner) window.Sound.win();
+          else if (isLoser) window.Sound.lose();
+        }, 500);
+      }
       break;
 
     case 'play_again_request':
@@ -631,8 +644,13 @@ function showDiceAnimation(callback) {
     myDiceEl.appendChild(die);
   }
 
+  // 音效：摇骰子
+  if (window.Sound) window.Sound.shake();
+
   setTimeout(() => {
     myDiceEl.querySelectorAll('.die').forEach(d => d.classList.remove('shaking'));
+    // 音效：骰子揭示
+    if (window.Sound) window.Sound.reveal();
     if (callback) callback();
   }, 1500);
 }
@@ -1019,6 +1037,7 @@ document.getElementById('btn-counter-challenge').addEventListener('click', () =>
 });
 
 document.getElementById('btn-surrender').addEventListener('click', () => {
+  if (window.Sound) window.Sound.surrender();
   sendMsg('surrender');
 });
 
@@ -1466,6 +1485,34 @@ function showDanmaku(data) {
 function init() {
   console.log('[Init] 页面加载，playerId:', state.playerId);
   connectWS();
+
+  // 音效开关按钮
+  const soundBtn = document.getElementById('btn-sound-toggle');
+  if (soundBtn && window.Sound) {
+    const updateIcon = () => {
+      const on = window.Sound.isEnabled();
+      soundBtn.textContent = on ? '🔊' : '🔇';
+      soundBtn.classList.toggle('muted', !on);
+      soundBtn.title = on ? '音效：开（点击关闭）' : '音效：关（点击开启）';
+    };
+    updateIcon();
+    soundBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      window.Sound.unlock();
+      const on = window.Sound.toggle();
+      updateIcon();
+      if (on) window.Sound.click();
+    });
+  }
+
+  // 首次用户交互时解锁 AudioContext（iOS/Safari 要求）
+  const unlockSound = () => {
+    if (window.Sound) window.Sound.unlock();
+    document.removeEventListener('click', unlockSound);
+    document.removeEventListener('touchstart', unlockSound);
+  };
+  document.addEventListener('click', unlockSound, { once: false });
+  document.addEventListener('touchstart', unlockSound, { once: false });
 
   // 检查 URL 是否包含房间码（链接直达）
   const roomCode = getRoomCodeFromURL();
