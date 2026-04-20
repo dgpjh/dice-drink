@@ -4,22 +4,20 @@
  */
 const GameEngine = require('./gameEngine');
 
-// 知名扑克选手昵称 - 混合华人活跃牌手 + 国际传奇（保留仍活跃的）
+// 机器人昵称池 - 扑克/娱乐/电竞/热梗混合
 const BOT_NAMES = [
-  // 华人活跃牌手（国内玩家熟悉）
-  'Tan Xuan',   // 谭轩 - 2023 EPT 巴塞罗那主赛冠军，中国牌手最高光时刻之一
-  'Cao Rui',    // 曹睿 - 2019 Triton 百万英镑短牌冠军，中国高额桌代表
-  'Danny Tang', // 邓欣 - 香港牌手，Triton 系列多冠，超高额桌常客
-  'Elton',      // Elton Tsang 曾义发 - 2016 Big One for One Drop 冠军（1200万美金）
-  'Winfred',    // Winfred Yu 于文森 - Triton 联合创始人，亚洲超高额桌推动者
-  'Brynn',      // Bryn Kenney - 现役奖金榜第一（华人圈昵称"布兰妮"）
-  // 国际传奇（仍活跃）
-  'Phil',       // Phil Ivey - 当代最强牌手，至今仍征战高额桌
-  'Hellmuth',   // Phil Hellmuth - 17 条 WSOP 金手链记录保持者
-  'Negreanu',   // Daniel Negreanu - 读牌之王，社媒与直播活跃
-  'Dwan',       // Tom "durrrr" Dwan - Triton 高额桌回归
-  'Galfond',    // Phil Galfond - PLO 之神，Run It Once 创始人
-  'Jungleman',  // Dan "Jungleman" Cates - 2021/2022 WSOP Poker Players Championship 背靠背冠军
+  'Tom Dwan',
+  '周润发',
+  '卢本伟',
+  '陈刀仔',
+  '乌兹',
+  '布兰妮',
+  '臧书奴',
+  '雷军',
+  '童锦程',
+  '新疆炒米粉',
+  'Tan Xuan',
+  '酱酱萌萌嘎',
 ];
 
 class BotPlayer {

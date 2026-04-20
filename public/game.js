@@ -355,7 +355,7 @@ function handleMessage(msg) {
       showToast(`${data.nickname} 想再整一局！（${data.readyCount}/${data.totalPlayers}）`, 'success');
       const playAgainBtn = document.getElementById('btn-play-again');
       playAgainBtn.disabled = false;
-      playAgainBtn.textContent = `🎲 ${data.readyCount}/${data.totalPlayers} 已就位，走你！`;
+      playAgainBtn.textContent = `🎲 ${data.readyCount}/${data.totalPlayers} 已就位，速进！`;
       playAgainBtn.classList.add('btn-glow');
       break;
 
@@ -468,7 +468,6 @@ document.getElementById('btn-create-room').addEventListener('click', async () =>
   document.querySelectorAll('.count-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.count === '2');
   });
-  document.getElementById('total-dice-hint').textContent = '场上共 10 颗骰子';
 
   // 拉取规则预设（有缓存就用缓存）
   await ensureRulesCatalog();
@@ -488,7 +487,7 @@ async function ensureRulesCatalog() {
     console.error('[Rules] 拉取失败，使用兜底', e);
     state.rulesCatalog = {
       presets: [
-        { id: 'classic', name: '深圳斋飞', shortDesc: '起叫 2N-1，+2/-1', detail: [] }
+        { id: 'classic', name: '深圳斋飞', shortDesc: '斋飞 +2 -1', detail: [] }
       ],
       singleBehaviors: [
         { id: 'zero', name: '归零', desc: '单骰直接归零' },
@@ -1685,7 +1684,7 @@ function showSettlementPage(data) {
   // 重置"再来一局"按钮
   const playAgainBtn = document.getElementById('btn-play-again');
   playAgainBtn.disabled = false;
-  playAgainBtn.textContent = '走你！再整一局';
+  playAgainBtn.textContent = '速进！再整一局';
   playAgainBtn.classList.remove('btn-glow');
 
   // 战绩统计
