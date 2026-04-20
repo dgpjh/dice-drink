@@ -155,6 +155,69 @@
     beep({ freq: 800, duration: 0.04, type: 'square', volume: 0.1 });
   }
 
+  /** Air Horn - DJ 喊麦气笛音效（劈骰/反劈专用） */
+  function playAirHorn() {
+    // 三段气笛：一段长 + 两段短
+    beep({ freq: 320, freqEnd: 280, duration: 0.35, type: 'sawtooth', volume: 0.22 });
+    beep({ freq: 480, freqEnd: 440, duration: 0.35, type: 'square', volume: 0.18 });
+    beep({ freq: 640, freqEnd: 600, duration: 0.35, type: 'sawtooth', volume: 0.12 });
+    // 短 stab
+    beep({ freq: 320, freqEnd: 280, duration: 0.12, type: 'sawtooth', volume: 0.2, delay: 0.45 });
+    beep({ freq: 480, freqEnd: 440, duration: 0.12, type: 'square', volume: 0.16, delay: 0.45 });
+    beep({ freq: 320, freqEnd: 280, duration: 0.12, type: 'sawtooth', volume: 0.2, delay: 0.62 });
+    beep({ freq: 480, freqEnd: 440, duration: 0.12, type: 'square', volume: 0.16, delay: 0.62 });
+  }
+
+  /** 欢呼 - 鼓掌 + "哦耶" 感（赢下回合触发） */
+  function playCheer() {
+    // 白噪声模拟掌声
+    noise({ duration: 0.6, volume: 0.14, filterFreq: 3000, delay: 0 });
+    noise({ duration: 0.5, volume: 0.12, filterFreq: 3500, delay: 0.15 });
+    // 叠加一个上行三连音（类似 "woo-hoo"）
+    beep({ freq: 523, duration: 0.1, type: 'triangle', volume: 0.22, delay: 0.1 });
+    beep({ freq: 659, duration: 0.1, type: 'triangle', volume: 0.22, delay: 0.22 });
+    beep({ freq: 880, duration: 0.22, type: 'triangle', volume: 0.28, delay: 0.35 });
+  }
+
+  /** 哀嚎 - 下行哀怨（输下回合触发，和 lose 叠加） */
+  function playGroan() {
+    beep({ freq: 380, freqEnd: 120, duration: 0.7, type: 'sawtooth', volume: 0.22 });
+    beep({ freq: 250, freqEnd: 80, duration: 0.55, type: 'triangle', volume: 0.18, delay: 0.15 });
+  }
+
+  /** 中大奖 - 豹子 / 纯豹 */
+  function playJackpot() {
+    // 上行琶音 + 铃铛感
+    const notes = [523, 659, 784, 1047, 1319]; // C5 E5 G5 C6 E6
+    notes.forEach((f, i) => {
+      beep({ freq: f, duration: 0.12, type: 'triangle', volume: 0.24, delay: i * 0.07 });
+    });
+    // 最后一记高音 + 泛音
+    beep({ freq: 1568, duration: 0.4, type: 'sine', volume: 0.3, delay: 0.38 });
+    beep({ freq: 3136, duration: 0.3, type: 'sine', volume: 0.12, delay: 0.4 });
+  }
+
+  /** 单骰 - 失望"鸭鸭鸭"音 */
+  function playSingle() {
+    beep({ freq: 300, freqEnd: 200, duration: 0.18, type: 'square', volume: 0.2 });
+    beep({ freq: 280, freqEnd: 180, duration: 0.18, type: 'square', volume: 0.2, delay: 0.18 });
+    beep({ freq: 250, freqEnd: 150, duration: 0.25, type: 'square', volume: 0.2, delay: 0.36 });
+  }
+
+  /** 心跳 - 倒计时最后 5 秒循环调用 */
+  function playHeartbeat() {
+    beep({ freq: 60, duration: 0.08, type: 'sine', volume: 0.35 });
+    beep({ freq: 50, duration: 0.12, type: 'sine', volume: 0.3, delay: 0.12 });
+  }
+
+  /** 入场欢呼 - 房间满员 / 开局 */
+  function playGameStart() {
+    beep({ freq: 392, duration: 0.15, type: 'triangle', volume: 0.25 });
+    beep({ freq: 523, duration: 0.15, type: 'triangle', volume: 0.25, delay: 0.12 });
+    beep({ freq: 659, duration: 0.2, type: 'triangle', volume: 0.28, delay: 0.24 });
+    beep({ freq: 784, duration: 0.3, type: 'triangle', volume: 0.32, delay: 0.38 });
+  }
+
   // =============== 公共接口 ===============
 
   window.Sound = {
@@ -168,6 +231,13 @@
     lose: playLose,
     surrender: playSurrender,
     click: playClick,
+    airhorn: playAirHorn,
+    cheer: playCheer,
+    groan: playGroan,
+    jackpot: playJackpot,
+    single: playSingle,
+    heartbeat: playHeartbeat,
+    gameStart: playGameStart,
 
     /** 切换开关 */
     toggle() {

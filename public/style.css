@@ -1,26 +1,63 @@
 /* =============== 基础重置 & 变量 =============== */
 :root {
-  --primary: #6C5CE7;
-  --primary-dark: #5A4BD1;
-  --primary-light: #A29BFE;
-  --secondary: #00CEC9;
-  --secondary-dark: #00B5B0;
-  --danger: #FF6B6B;
-  --danger-dark: #EE5A5A;
-  --warning: #FDCB6E;
-  --warning-dark: #F0B93C;
-  --success: #00B894;
-  --bg: #0F0E17;
-  --bg-card: #1A1929;
-  --bg-card-hover: #242339;
+  /* 霓虹紫 / 骚粉 / 酸绿 Y2K 赛博配色 */
+  --primary: #B026FF;          /* 霓虹紫 */
+  --primary-dark: #8E00E0;
+  --primary-light: #D77AFF;
+  --secondary: #00F0FF;        /* 电光青 */
+  --secondary-dark: #00C8D4;
+  --neon-pink: #FF2E9A;        /* 骚粉 */
+  --neon-green: #00FF9C;       /* 酸绿 */
+  --neon-yellow: #F9F871;
+  --danger: #FF2E6A;
+  --danger-dark: #E81E56;
+  --warning: #FFC93C;
+  --warning-dark: #E8B12C;
+  --success: #00FF9C;
+  --bg: #0A0614;               /* 更深的夜色 */
+  --bg-card: #15102A;
+  --bg-card-hover: #1F1840;
   --text: #FFFFFE;
-  --text-secondary: #A7A9BE;
-  --text-muted: #6B6D7E;
-  --border: #2D2C3E;
-  --radius: 12px;
-  --radius-sm: 8px;
-  --shadow: 0 4px 20px rgba(0,0,0,0.3);
+  --text-secondary: #C5BDE0;
+  --text-muted: #7B6E9C;
+  --border: #2E1F5C;
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 4px 20px rgba(176, 38, 255, 0.25);
 }
+
+/* 赛博霓虹背景网格 - 全屏 */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(176, 38, 255, 0.18), transparent 50%),
+    radial-gradient(ellipse at 80% 90%, rgba(255, 46, 154, 0.15), transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(0, 240, 255, 0.08), transparent 60%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(176, 38, 255, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(176, 38, 255, 0.07) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+  animation: gridScroll 20s linear infinite;
+}
+
+@keyframes gridScroll {
+  from { background-position: 0 0, 0 0; }
+  to { background-position: 40px 40px, 40px 40px; }
+}
+
+#app { z-index: 1; }
 
 * {
   margin: 0;
@@ -95,10 +132,25 @@ html, body {
 }
 
 .btn-primary {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), var(--neon-pink));
   color: white;
+  box-shadow: 0 4px 16px rgba(176, 38, 255, 0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+  position: relative;
+  overflow: hidden;
 }
-.btn-primary:hover:not(:disabled) { background: var(--primary-dark); }
+.btn-primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--primary-dark), #E01E7A);
+  box-shadow: 0 6px 24px rgba(255, 46, 154, 0.5);
+}
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  transform: translateX(-100%);
+  transition: transform 0.6s;
+}
+.btn-primary:hover:not(:disabled)::after { transform: translateX(100%); }
 
 .btn-secondary {
   background: var(--secondary);
@@ -264,8 +316,17 @@ html, body {
 }
 
 .dice-icon {
-  font-size: 72px;
-  animation: bounce 2s ease infinite;
+  font-size: 84px;
+  display: inline-block;
+  animation: diceWobble 2.4s ease-in-out infinite;
+  filter: drop-shadow(0 0 16px rgba(176, 38, 255, 0.7));
+}
+
+@keyframes diceWobble {
+  0%, 100%  { transform: translateY(0) rotate(-8deg); }
+  25%       { transform: translateY(-8px) rotate(6deg); }
+  50%       { transform: translateY(-14px) rotate(-4deg); }
+  75%       { transform: translateY(-6px) rotate(8deg); }
 }
 
 @keyframes bounce {
@@ -274,19 +335,30 @@ html, body {
 }
 
 .game-title {
-  font-size: 42px;
-  font-weight: 800;
-  background: linear-gradient(135deg, var(--primary-light), var(--secondary));
+  font-size: 48px;
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--neon-pink), var(--primary-light), var(--secondary));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  margin-top: 8px;
+  margin-top: 12px;
+  letter-spacing: 4px;
+  text-shadow: 0 0 30px rgba(255, 46, 154, 0.4);
+  filter: drop-shadow(0 2px 8px rgba(176, 38, 255, 0.5));
+  animation: titleGlow 3s ease-in-out infinite;
+}
+
+@keyframes titleGlow {
+  0%, 100% { filter: drop-shadow(0 2px 8px rgba(176, 38, 255, 0.5)); }
+  50%      { filter: drop-shadow(0 2px 20px rgba(255, 46, 154, 0.8)); }
 }
 
 .subtitle {
   color: var(--text-secondary);
-  font-size: 16px;
-  margin-top: 8px;
+  font-size: 14px;
+  margin-top: 10px;
+  letter-spacing: 2px;
+  opacity: 0.85;
 }
 
 .menu-buttons {
@@ -488,22 +560,23 @@ html, body {
 .dot.bottom-right { grid-column: 3; grid-row: 3; align-self: end; justify-self: end; }
 
 @keyframes dieReveal {
-  0% { transform: rotateY(0deg); }
-  50% { transform: rotateY(90deg); }
-  100% { transform: rotateY(0deg); }
+  0%   { transform: rotateY(0deg) rotateX(0deg) scale(1); }
+  30%  { transform: rotateY(180deg) rotateX(90deg) scale(1.15); }
+  60%  { transform: rotateY(360deg) rotateX(180deg) scale(0.95); }
+  100% { transform: rotateY(360deg) rotateX(360deg) scale(1); }
 }
 
 @keyframes diceShake {
-  0%, 100% { transform: translate(0, 0) rotate(0deg); }
-  10% { transform: translate(-4px, -2px) rotate(-5deg); }
-  20% { transform: translate(4px, 2px) rotate(5deg); }
-  30% { transform: translate(-4px, 2px) rotate(-3deg); }
-  40% { transform: translate(4px, -2px) rotate(3deg); }
-  50% { transform: translate(-2px, 4px) rotate(-2deg); }
-  60% { transform: translate(2px, -4px) rotate(2deg); }
-  70% { transform: translate(-4px, 2px) rotate(-4deg); }
-  80% { transform: translate(4px, -2px) rotate(4deg); }
-  90% { transform: translate(-2px, -4px) rotate(-1deg); }
+  0%, 100% { transform: translate(0, 0) rotate(0deg) scale(1); }
+  10% { transform: translate(-6px, -4px) rotate(-15deg) scale(1.05); }
+  20% { transform: translate(6px, 4px) rotate(18deg) scale(0.95); }
+  30% { transform: translate(-5px, 6px) rotate(-12deg) scale(1.08); }
+  40% { transform: translate(6px, -5px) rotate(20deg) scale(0.93); }
+  50% { transform: translate(-4px, 7px) rotate(-8deg) scale(1.1); }
+  60% { transform: translate(5px, -7px) rotate(14deg) scale(0.94); }
+  70% { transform: translate(-6px, 3px) rotate(-18deg) scale(1.06); }
+  80% { transform: translate(6px, -4px) rotate(16deg) scale(0.96); }
+  90% { transform: translate(-3px, -6px) rotate(-6deg) scale(1.03); }
 }
 
 .die.shaking {
@@ -1386,4 +1459,135 @@ html, body {
     width: 8px;
     height: 8px;
   }
+}
+
+/* =============== Y2K 交互增强 =============== */
+
+/* 轮到我时，我方区域脉冲霓虹光 */
+.my-area.my-turn {
+  border-radius: var(--radius);
+  animation: myTurnPulse 1.6s ease-in-out infinite;
+  position: relative;
+}
+@keyframes myTurnPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(176, 38, 255, 0.6), 0 0 0 0 rgba(255, 46, 154, 0.4); }
+  50%      { box-shadow: 0 0 20px 4px rgba(176, 38, 255, 0.8), 0 0 40px 10px rgba(255, 46, 154, 0.25); }
+}
+
+/* 轮到我时，操作区按钮呼吸 */
+.action-area.my-turn-active .btn-primary,
+.action-area.my-turn-active .btn-danger,
+.action-area.my-turn-active .btn-warning {
+  animation: btnBreath 1.5s ease-in-out infinite;
+}
+@keyframes btnBreath {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50%      { transform: scale(1.03); filter: brightness(1.15); }
+}
+
+/* 全屏震动（开骰时） */
+.shake-screen {
+  animation: screenShake 0.5s cubic-bezier(.36,.07,.19,.97);
+}
+@keyframes screenShake {
+  10%, 90% { transform: translate(-2px, 0); }
+  20%, 80% { transform: translate(3px, 0); }
+  30%, 50%, 70% { transform: translate(-5px, 1px); }
+  40%, 60% { transform: translate(5px, -1px); }
+}
+
+/* 开骰全屏闪白 */
+.flash-overlay {
+  position: fixed;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255,255,255,0.95), rgba(255, 46, 154, 0.3));
+  z-index: 9999;
+  pointer-events: none;
+  animation: flashWhite 0.4s ease-out forwards;
+}
+@keyframes flashWhite {
+  0%   { opacity: 0; }
+  20%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* 倒计时危险状态（剩 ≤5 秒） */
+.timer-bar.danger .timer-fill {
+  background: linear-gradient(90deg, #FF2E6A, #FF2E9A);
+  animation: timerDanger 0.4s ease infinite alternate;
+}
+.timer-bar.danger .timer-text {
+  color: #FF2E6A;
+  font-weight: 800;
+  text-shadow: 0 0 8px rgba(255, 46, 106, 0.8);
+  animation: timerTextBlink 0.4s ease infinite alternate;
+}
+@keyframes timerDanger {
+  from { box-shadow: inset 0 0 4px rgba(255,46,106,0.5); }
+  to   { box-shadow: inset 0 0 16px rgba(255,46,106,0.9), 0 0 12px rgba(255,46,106,0.6); }
+}
+@keyframes timerTextBlink {
+  from { opacity: 0.7; transform: translate(-50%, -50%) scale(1); }
+  to   { opacity: 1;   transform: translate(-50%, -50%) scale(1.12); }
+}
+
+/* 结算标题霓虹发光 */
+.settlement-title {
+  background: linear-gradient(135deg, var(--neon-pink), var(--primary-light), var(--secondary)) !important;
+  -webkit-background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  background-clip: text !important;
+  filter: drop-shadow(0 0 14px rgba(255, 46, 154, 0.6));
+  font-size: 32px !important;
+}
+
+/* 骰子悬浮光效（我方） */
+.my-dice .die {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.4), 0 0 8px rgba(176, 38, 255, 0.25);
+}
+
+/* 对手叫数时，他们的卡片闪一下 */
+.opponent-area.speaking {
+  animation: opponentFlash 0.8s ease;
+}
+@keyframes opponentFlash {
+  0%, 100% { background: transparent; }
+  30%      { background: rgba(0, 240, 255, 0.12); border-radius: var(--radius-sm); }
+}
+
+/* 弹幕更潮：加霓虹描边 */
+.danmaku-item {
+  box-shadow: 0 2px 12px rgba(176, 38, 255, 0.3);
+  backdrop-filter: blur(4px);
+}
+.danmaku-item.mine {
+  color: var(--primary-light);
+  background: rgba(176, 38, 255, 0.2);
+  border: 1px solid rgba(215, 122, 255, 0.4);
+}
+.danmaku-item.theirs {
+  color: var(--secondary);
+  background: rgba(0, 240, 255, 0.15);
+  border: 1px solid rgba(0, 240, 255, 0.4);
+}
+.danmaku-item.trash {
+  color: var(--neon-pink);
+  background: rgba(255, 46, 154, 0.15);
+  border: 1px solid rgba(255, 46, 154, 0.4);
+  font-weight: 700;
+}
+
+/* 房间码显示 - 霓虹感 */
+.code-digit {
+  background: var(--bg-card);
+  border: 2px solid var(--neon-pink);
+  color: var(--neon-pink);
+  box-shadow: 0 0 12px rgba(255, 46, 154, 0.3), inset 0 0 8px rgba(255, 46, 154, 0.15);
+  text-shadow: 0 0 8px rgba(255, 46, 154, 0.6);
+}
+
+/* 玩家头像名字悬浮描边 */
+.player-item.you {
+  border-color: var(--neon-pink);
+  box-shadow: 0 0 16px rgba(255, 46, 154, 0.3);
 }

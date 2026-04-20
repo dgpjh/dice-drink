@@ -48,6 +48,9 @@ const state = {
   roomCreatedAt: null
 };
 
+// 暴露给 trashTalk.js 使用
+window.state = state;
+
 // =============== WebSocket ===============
 function connectWS() {
   // 如果已有连接且处于 OPEN 或 CONNECTING 状态，不重复创建
@@ -211,6 +214,12 @@ function handleMessage(msg) {
       updateActionArea();
       resetTimer();
       if (window.Sound) window.Sound.bid();
+      // 损友吐槽
+      if (window.TrashTalk) {
+        const bidderId = data.bid && data.bid.playerId;
+        if (bidderId === state.playerId) window.TrashTalk.onMyBid();
+        else window.TrashTalk.onOtherBid(bidderId);
+      }
       break;
 
     case 'challenge_started':
@@ -225,7 +234,15 @@ function handleMessage(msg) {
       state.phase = 'challenging';
       showChallengeUI(data);
       resetTimer();
-      if (window.Sound) window.Sound.challenge();
+      if (window.Sound) {
+        window.Sound.challenge();
+        window.Sound.airhorn();
+      }
+      // 损友吐槽
+      if (window.TrashTalk) {
+        if (data.target === state.playerId) window.TrashTalk.onMeChallenged();
+        else window.TrashTalk.onOtherChallenged();
+      }
       break;
 
     case 'counter_challenge':
@@ -240,7 +257,15 @@ function handleMessage(msg) {
       state.isMyTurn = data.currentTurn === state.playerId;
       updateChallengeUI(data);
       resetTimer();
-      if (window.Sound) window.Sound.counter();
+      if (window.Sound) {
+        window.Sound.counter();
+        window.Sound.airhorn();
+      }
+      // 损友吐槽
+      if (window.TrashTalk) {
+        if (data.player === state.playerId) window.TrashTalk.onMyCounter();
+        else window.TrashTalk.onOtherChallenged();
+      }
       break;
 
     case 'game_settled':
@@ -250,6 +275,8 @@ function handleMessage(msg) {
         state.playerOrder = data.playerOrder;
       }
       clearTimer();
+      // 震屏 + 闪白
+      triggerOpenEffects();
       showSettlementPage(data);
       if (window.Sound) {
         // 先开骰声，再根据胜负响胜负音
@@ -257,17 +284,56 @@ function handleMessage(msg) {
         const isWinner = data.winner === state.playerId;
         const isLoser = data.loser === state.playerId;
         setTimeout(() => {
-          if (isWinner) window.Sound.win();
-          else if (isLoser) window.Sound.lose();
+          if (isWinner) { window.Sound.win(); window.Sound.cheer(); }
+          else if (isLoser) { window.Sound.lose(); window.Sound.groan(); }
         }, 500);
+        // 检测豹子/纯豹/单骰，触发中奖/失望音
+        if (data.allDice) {
+          let hasJackpot = false;
+          let hasSingle = false;
+          let jackpotPid = null;
+          let singlePid = null;
+          Object.keys(data.allDice).forEach(pid => {
+            const info = data.allDice[pid];
+            if (!info || !info.pattern) return;
+            if (info.pattern.type === 'leopard' || info.pattern.type === 'pureLeopard') {
+              hasJackpot = true;
+              jackpotPid = pid;
+            }
+            if (info.pattern.type === 'single') {
+              hasSingle = true;
+              singlePid = pid;
+            }
+          });
+          if (hasJackpot) {
+            setTimeout(() => window.Sound.jackpot(), 1200);
+            if (window.TrashTalk) window.TrashTalk.onLeopard(jackpotPid);
+          }
+          if (hasSingle) {
+            setTimeout(() => window.Sound.single(), 1400);
+            if (window.TrashTalk) window.TrashTalk.onSingle(singlePid);
+          }
+        }
+      }
+      // 胜负损友吐槽
+      if (window.TrashTalk) {
+        if (data.winner === state.playerId) window.TrashTalk.onMeWinOpen();
+        else if (data.loser === state.playerId) window.TrashTalk.onMeLoseOpen();
+        if (data.loser) window.TrashTalk.onOtherLose(data.loser);
+        if (data.winner && data.winner !== state.playerId) window.TrashTalk.onOtherWin(data.winner);
+        // 连败
+        const loserStats = data.stats && data.loser ? data.stats[data.loser] : null;
+        if (loserStats && loserStats.streak >= 3) {
+          window.TrashTalk.onStreak(data.loser);
+        }
       }
       break;
 
     case 'play_again_request':
-      showToast(`${data.nickname} 想再来一局！（${data.readyCount}/${data.totalPlayers}）`, 'success');
+      showToast(`${data.nickname} 想再整一局！（${data.readyCount}/${data.totalPlayers}）`, 'success');
       const playAgainBtn = document.getElementById('btn-play-again');
       playAgainBtn.disabled = false;
-      playAgainBtn.textContent = `🎲 ${data.readyCount}/${data.totalPlayers} 已准备，点击开始！`;
+      playAgainBtn.textContent = `🎲 ${data.readyCount}/${data.totalPlayers} 已就位，走你！`;
       playAgainBtn.classList.add('btn-glow');
       break;
 
@@ -792,8 +858,15 @@ function updateActionArea() {
     biddingArea.style.display = 'none';
     challengedArea.style.display = 'none';
     waitingArea.style.display = 'block';
-    waitingText.textContent = `🍺 等待 ${getCurrentTurnName()} 叫骰...`;
+    waitingText.textContent = `🍺 等 ${getCurrentTurnName()} 叫骰，磨叽啥呢...`;
   }
+
+  // 我方回合视觉脉冲
+  const myArea = document.querySelector('.my-area');
+  if (myArea) myArea.classList.toggle('my-turn', !!state.isMyTurn);
+  [biddingArea, challengedArea].forEach(el => {
+    if (el) el.classList.toggle('my-turn-active', !!state.isMyTurn);
+  });
 }
 
 // =============== 叫数选择器 ===============
@@ -1038,6 +1111,7 @@ document.getElementById('btn-counter-challenge').addEventListener('click', () =>
 
 document.getElementById('btn-surrender').addEventListener('click', () => {
   if (window.Sound) window.Sound.surrender();
+  if (window.TrashTalk) window.TrashTalk.onMySurrender();
   sendMsg('surrender');
 });
 
@@ -1107,6 +1181,7 @@ function resetTimer() {
 function updateTimerDisplay() {
   const pct = (state.timerRemaining / 30) * 100;
   const text = `⏱ ${state.timerRemaining}秒`;
+  const danger = state.timerRemaining <= 5 && state.timerRemaining > 0;
 
   ['timer-fill', 'timer-fill-challenge', 'timer-fill-waiting'].forEach(id => {
     const el = document.getElementById(id);
@@ -1117,6 +1192,40 @@ function updateTimerDisplay() {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
   });
+
+  // 倒计时危险状态样式（红闪+心跳）
+  ['timer-bar', 'timer-bar-challenge', 'timer-bar-waiting'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('danger', danger);
+  });
+
+  // 最后 5 秒心跳音（只在轮到自己时响）
+  if (danger && state.isMyTurn && window.Sound) {
+    window.Sound.heartbeat();
+  }
+
+  // 轮到我 + 剩 5 秒，触发一次损友吐槽
+  if (state.timerRemaining === 5 && state.isMyTurn && window.TrashTalk) {
+    window.TrashTalk.onTimerWarn();
+  }
+}
+
+// =============== 开骰全屏特效 ===============
+function triggerOpenEffects() {
+  // 震屏
+  const app = document.getElementById('app');
+  if (app) {
+    app.classList.remove('shake-screen');
+    // 触发 reflow 重启动画
+    void app.offsetWidth;
+    app.classList.add('shake-screen');
+    setTimeout(() => app.classList.remove('shake-screen'), 500);
+  }
+  // 闪白
+  const flash = document.createElement('div');
+  flash.className = 'flash-overlay';
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 450);
 }
 
 // =============== 结算页面 ===============
@@ -1126,13 +1235,13 @@ function showSettlementPage(data) {
   // 标题
   const titleEl = document.getElementById('settlement-title');
   if (data.type === 'surrender') {
-    titleEl.textContent = '🏳️ 认输';
+    titleEl.textContent = '🏳️ 怂了怂了';
   } else if (data.type === 'timeout') {
-    titleEl.textContent = '⏱ 超时';
+    titleEl.textContent = '⏱ 磨叽啥呢！';
   } else if (data.type === 'disconnect') {
-    titleEl.textContent = '📡 掉线';
+    titleEl.textContent = '📡 跑路了？';
   } else {
-    titleEl.textContent = '🎲 开骰！';
+    titleEl.textContent = '🎲 开！！！';
   }
 
   // 所有玩家骰子
@@ -1256,13 +1365,35 @@ function showSettlementPage(data) {
   const isWinner = data.winner === state.playerId;
   const loserStats = data.stats && data.loser ? data.stats[data.loser] : null;
   const isRekt = loserStats && loserStats.streak >= 3 && loserStats.totalScore >= 5;
-  let loseText = '😢 你输了';
-  let winText = '🏆 你赢了！';
+
+  // 随机骚话
+  const winLines = [
+    '🏆 赢麻了！',
+    '🏆 就这？',
+    '🏆 稳如老狗',
+    '🏆 技术性碾压'
+  ];
+  const loseLines = [
+    '😵 走了走了，喝酒去',
+    '😩 这把不算，下把来',
+    '🥴 算你运气好',
+    '😭 我不服，再来'
+  ];
+  const rektLoseLines = [
+    '🥴 菜就多练，练就多菜',
+    '🫠 今晚车费我出',
+    '💀 建议明早再战',
+    '🍺 喝到天明就对了'
+  ];
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
+  let loseText = pick(loseLines);
+  let winText = pick(winLines);
   if (isRekt) {
     if (!isWinner) {
-      loseText = '🥴 菜就多练';
+      loseText = pick(rektLoseLines);
     } else {
-      winText = `🏆 你赢了！${data.loserNickname || '对面'}菜就多练`;
+      winText = `🏆 赢！${data.loserNickname || '对面'}别哭`;
     }
   }
 
@@ -1272,7 +1403,7 @@ function showSettlementPage(data) {
   if (isInvolved) {
     resultText = isWinner ? winText : loseText;
   } else {
-    resultText = `${data.winnerNickname || '???'} 赢了，${data.loserNickname || '???'} 输了`;
+    resultText = `🎭 ${data.winnerNickname || '???'} 赢了 · ${data.loserNickname || '???'} 喝酒`;
   }
 
   resultEl.innerHTML = `
@@ -1287,12 +1418,12 @@ function showSettlementPage(data) {
   // 重置"再来一局"按钮
   const playAgainBtn = document.getElementById('btn-play-again');
   playAgainBtn.disabled = false;
-  playAgainBtn.textContent = '再来一局';
+  playAgainBtn.textContent = '走你！再整一局';
   playAgainBtn.classList.remove('btn-glow');
 
   // 战绩统计
   const statsEl = document.getElementById('settlement-stats');
-  statsEl.innerHTML = '<div class="stats-title">🍻 今晚战绩</div>';
+  statsEl.innerHTML = '<div class="stats-title">🍻 今晚谁喝多了</div>';
   if (data.stats) {
     const orderedPids = (data.playerOrder || state.playerOrder || []).map(p => p.id || p);
     const displayPids = orderedPids.length > 0 ? orderedPids : Object.keys(data.stats);
