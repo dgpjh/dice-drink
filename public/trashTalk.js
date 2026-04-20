@@ -282,7 +282,7 @@
 
   // ========== 触发节流（避免一下喷太多）==========
   let lastFireAt = 0;
-  const MIN_INTERVAL = 800; // 两次吐槽最小间隔（ms）
+  const MIN_INTERVAL = 1500; // 两次吐槽最小间隔（ms），控制整体频次 ~每 2-3 个动作 1 条
 
   function fire(category, opts = {}) {
     const now = Date.now();
@@ -309,9 +309,10 @@
   }
 
   // ========== 事件接口 ==========
+  // 整体触发频次控制：配合 MIN_INTERVAL=1500ms，平均每 2-3 个动作 1 条弹幕
   window.TrashTalk = {
     onMyBid() {
-      fire('myBid', { probability: 0.25, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
+      fire('myBid', { probability: 0.15, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
     },
     onOtherBid(bidderId) {
       // 让"非叫数者"中的人来吐槽
@@ -319,62 +320,64 @@
       const candidates = all.filter(p => p.id !== bidderId);
       if (candidates.length === 0) return;
       const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherBid', { probability: 0.4, speaker: sp });
+      fire('otherBid', { probability: 0.22, speaker: sp });
     },
     onMeChallenged() {
-      fire('meChallenged', { probability: 0.7 });
+      fire('meChallenged', { probability: 0.4 });
     },
     onOtherChallenged() {
-      fire('otherChallenged', { probability: 0.6 });
+      fire('otherChallenged', { probability: 0.3 });
     },
     onMyCounter() {
-      fire('myCounter', { probability: 0.5, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
+      fire('myCounter', { probability: 0.3, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
     },
     onMeWinOpen() {
-      fire('meWinOpen', { probability: 0.75, speaker: { id: window.state?.playerId, nickname: window.state?.nickname }, delay: 800 });
+      fire('meWinOpen', { probability: 0.5, speaker: { id: window.state?.playerId, nickname: window.state?.nickname }, delay: 800 });
     },
     onMeLoseOpen() {
-      fire('meLoseOpen', { probability: 0.75, speaker: { id: window.state?.playerId, nickname: window.state?.nickname }, delay: 800 });
+      fire('meLoseOpen', { probability: 0.5, speaker: { id: window.state?.playerId, nickname: window.state?.nickname }, delay: 800 });
     },
     onOtherWin(winnerId) {
       const all = window.state?.playerOrder || [];
       const candidates = all.filter(p => p.id !== winnerId);
       if (candidates.length === 0) return;
       const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherWin', { probability: 0.7, speaker: sp, delay: 1000 });
+      fire('otherWin', { probability: 0.4, speaker: sp, delay: 1000 });
     },
     onOtherLose(loserId) {
       const all = window.state?.playerOrder || [];
       const candidates = all.filter(p => p.id !== loserId);
       if (candidates.length === 0) return;
       const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherLose', { probability: 0.85, speaker: sp, delay: 1500, force: true });
+      fire('otherLose', { probability: 0.55, speaker: sp, delay: 1500 });
     },
     onLeopard(playerId) {
-      fire('leopard', { probability: 0.9, delay: 2000, force: true });
+      // 豹子是稀有事件，保留较高概率但不强制
+      fire('leopard', { probability: 0.7, delay: 2000 });
     },
     onSingle(playerId) {
-      fire('single', { probability: 0.8, delay: 2000, force: true });
+      fire('single', { probability: 0.55, delay: 2000 });
     },
     onStreak(loserId) {
       const all = window.state?.playerOrder || [];
       const candidates = all.filter(p => p.id !== loserId);
       if (candidates.length === 0) return;
       const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('streak', { probability: 1.0, speaker: sp, delay: 2500, force: true });
+      // 连败是低频事件，保留较高概率
+      fire('streak', { probability: 0.8, speaker: sp, delay: 2500 });
     },
     onTimerWarn() {
-      fire('timerWarn', { probability: 0.5 });
+      fire('timerWarn', { probability: 0.25 });
     },
     onMySurrender() {
-      fire('mySurrender', { probability: 0.8, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
+      fire('mySurrender', { probability: 0.5, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
     },
     onOtherSurrender(surrenderId) {
       const all = window.state?.playerOrder || [];
       const candidates = all.filter(p => p.id !== surrenderId);
       if (candidates.length === 0) return;
       const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherSurrender', { probability: 0.75, speaker: sp });
+      fire('otherSurrender', { probability: 0.45, speaker: sp });
     },
   };
 })();
