@@ -488,7 +488,7 @@ async function ensureRulesCatalog() {
     console.error('[Rules] 拉取失败，使用兜底', e);
     state.rulesCatalog = {
       presets: [
-        { id: 'classic', name: '经典飞斋', shortDesc: '+2/-1，1点飞时为癞', detail: [] }
+        { id: 'classic', name: '深圳斋飞', shortDesc: '起叫 2N-1，+2/-1', detail: [] }
       ],
       singleBehaviors: [
         { id: 'zero', name: '归零', desc: '单骰直接归零' },
