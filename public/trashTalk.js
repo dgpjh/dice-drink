@@ -127,6 +127,111 @@
     ],
   };
 
+  // ========== 人设专属文案（按昵称匹配）==========
+  // 仅覆盖高频分类，其它分类 fallback 到通用 LINES
+  // 混排策略：命中专属池时，60% 用专属、40% 用通用，避免角色感过于重复
+  const PERSONAL_LINES = {
+    'Tom Dwan': {
+      myBid: ['这把我 all in', '让你看看什么叫 durrrr', '深夜高额桌的感觉回来了'],
+      otherBid: ['你这手牌我猜到了', '算我头上，下次还', '你的 range 太窄了'],
+      meWinOpen: ['三条在这把其实是弱牌', '就知道你在诈我', '这波该我赢'],
+      meLoseOpen: ['欠条一张，改天还', '这把算我欠你的'],
+      otherLose: ['下次来高额桌找我', '这点筹码还不够我塞牙缝'],
+      leopard: ['这种牌面我见太多了', '高额桌天天上演'],
+    },
+    '周润发': {
+      myBid: ['小意思，发哥从不 bluff', '一手烂牌也能打到最后', '发哥出手，必见血'],
+      otherBid: ['运气这种东西，是要还的', '你还差了点火候', '赌场无父子'],
+      meWinOpen: ['我赢的不是钱，是面子', '5 点也能变 9 点', '朱古力还有吗？'],
+      meLoseOpen: ['愿赌服输，下一局', '发哥今天手气不顺'],
+      otherLose: ['慢慢喝，别呛着', '这点酒算什么'],
+      leopard: ['赌神附体', '该我发威了'],
+    },
+    '卢本伟': {
+      myBid: ['我没开挂！', '芜湖～起飞', '这把是我演的'],
+      otherBid: ['你这操作有点迷啊', '兄弟心态崩了？', '这把你听我的'],
+      meWinOpen: ['看见没，真本事', '芜湖！', '这就叫五五开'],
+      meLoseOpen: ['我真没开挂啊兄弟', '这把是故意让你的'],
+      otherLose: ['菜就多练', '下次别送了'],
+      leopard: ['这运气让我想起当年', '稳得一批'],
+      streak: ['兄弟心态要稳', '深呼吸，下一把'],
+    },
+    '陈刀仔': {
+      myBid: ['我用 10 蚊赢你 1000 万', '搏一搏，单车变摩托', '天无绝人之路'],
+      otherBid: ['你这牌我早看穿了', '赌就要赌到底', '怕就别上桌'],
+      meWinOpen: ['10 蚊博 1000 万，稳赚', '刀仔出手，从不落空', '这波赢麻了'],
+      meLoseOpen: ['输就输，江湖再见', '下把我翻倍回来'],
+      otherLose: ['认命啦兄弟', '输钱莫怨天'],
+      myCounter: ['搏大细啊喂', '翻倍翻倍！'],
+    },
+    '乌兹': {
+      myBid: ['稳住，我们能赢', '这波我来 carry', '上等马对下等马'],
+      otherBid: ['你这操作有点 menace', '心态别崩', '这把团战让我'],
+      meWinOpen: ['我还能再战十年', '小狗永不退役', '稳得一批'],
+      meLoseOpen: ['这把团队没跟上', '下一把继续'],
+      otherLose: ['菜，是原罪', '下次练练再来'],
+      myCounter: ['团战开启', '跟我上！'],
+      streak: ['心态要稳，小狗', '别浪，稳扎稳打'],
+    },
+    '布兰妮': {
+      myBid: ['GTO 告诉我这里该叫', 'EV 是正的就对了', 'range 很宽，但我很稳'],
+      otherBid: ['你这打法偏离 GTO 了', '底池赔率不对啊', '这手牌 EV 为负'],
+      meWinOpen: ['solver 早就算好了', '数学不会骗人', '按 frequency 该我赢'],
+      meLoseOpen: ['方差而已，长期看我是赢的', '样本太少，不说明问题'],
+      otherLose: ['建议回去看看 GTO Wizard', 'solver 你学一下'],
+      leopard: ['概率学的胜利', '符合分布'],
+    },
+    '臧书奴': {
+      myBid: ['这把不能输', '让我算一下', '已经在脑海里走了三遍'],
+      otherBid: ['你这思路不对', '再想想？', '没这么简单吧'],
+      meWinOpen: ['计算无误', '一切尽在掌握', '细节决定成败'],
+      meLoseOpen: ['有个变量没算进去', '下把调整'],
+      otherLose: ['基本功不够', '回去多练'],
+      timerWarn: ['快做决定', '别犹豫'],
+    },
+    '雷军': {
+      myBid: ['Are you OK?', '这把性价比很高', '厚道的人不会输'],
+      otherBid: ['Are you OK?', '这个价格有点贵了', '兄弟你没跑分吧'],
+      meWinOpen: ['性价比之王', '感谢米粉支持', 'Are you OK？我 OK'],
+      meLoseOpen: ['这把我请客', '下次发布会见'],
+      otherLose: ['喝酒要讲性价比', '来，米粉陪你一杯'],
+      leopard: ['这叫工业设计的胜利', '细节堆出来的'],
+    },
+    '童锦程': {
+      myBid: ['兄弟们我爱你们', '这把我来，不能让兄弟失望', '冲冲冲'],
+      otherBid: ['兄弟你这叫得有点虚', '心疼兄弟一秒', '稳住别慌'],
+      meWinOpen: ['兄弟们这波不亏', '爱你们哦', '干就完了'],
+      meLoseOpen: ['兄弟们对不起', '下把我扛'],
+      otherLose: ['来兄弟，哥请你', '喝一杯，兄弟情深'],
+      myCounter: ['兄弟们看我的', '这把必须硬刚'],
+      mySurrender: ['兄弟我扛不住了', '这杯我喝，不让兄弟为难'],
+    },
+    '新疆炒米粉': {
+      myBid: ['炒一盘压压惊', '要不要加辣？', '这把之后请你吃炒米粉'],
+      otherBid: ['米粉都凉了你还在想', '加个鸡蛋再叫', '油不够多啊兄弟'],
+      meWinOpen: ['今晚加肉', '老板，再来一盘', '赢麻了，请客请客'],
+      meLoseOpen: ['米粉糊锅了', '这把算我炒坏了'],
+      otherLose: ['来碗米粉解解酒', '辣度加满陪你喝'],
+      leopard: ['这锅气绝了', '火候刚刚好'],
+    },
+    'Tan Xuan': {
+      myBid: ['底池赔率合适', '这手牌价值很明显', '深筹码时要谨慎'],
+      otherBid: ['你这 sizing 有问题', '线路不太合理', '读牌读偏了'],
+      meWinOpen: ['value bet 精准', '价值榨干', 'EPT 冠军的手感'],
+      meLoseOpen: ['hero call 失败', '下把调整线路'],
+      otherLose: ['基本功问题', '建议复盘一下'],
+      myCounter: ['反加是必须的', '这里必须施压'],
+    },
+    '酱酱萌萌嘎': {
+      myBid: ['嘤嘤嘤，哥哥让让嘛', '人家就叫这么多嘛～', '萌新第一次玩'],
+      otherBid: ['哥哥你好凶哦', '萌萌哒，不想喝酒酒', '可是人家不相信嘛'],
+      meWinOpen: ['嘻嘻，萌新的胜利～', '哥哥认输吧～', '运气好好哦'],
+      meLoseOpen: ['呜呜呜人家输了', '哥哥欺负我', '喝酒酒～'],
+      otherLose: ['哥哥喝酒酒啦～', '不要哭嘛～', '下次萌新陪你'],
+      mySurrender: ['人家认输啦～', '嘤嘤嘤不打了'],
+    },
+  };
+
   // 机器人发言用的"其他玩家"昵称（从 playerOrder 里随机挑一个非自己的）
   function pickSpeaker(excludeMe = true) {
     if (!window.state) return null;
@@ -138,10 +243,20 @@
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
-  function pickLine(category) {
-    const arr = LINES[category];
-    if (!arr || arr.length === 0) return null;
-    return arr[Math.floor(Math.random() * arr.length)];
+  function pickLine(category, nickname) {
+    const commonArr = LINES[category];
+    const personalArr = (nickname && PERSONAL_LINES[nickname] && PERSONAL_LINES[nickname][category]) || null;
+
+    // 有专属池：60% 走专属、40% 走通用（混排，避免角色感过于重复）
+    if (personalArr && personalArr.length > 0) {
+      const usePersonal = Math.random() < 0.6 || !commonArr || commonArr.length === 0;
+      const arr = usePersonal ? personalArr : commonArr;
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+
+    // 无专属池：走通用
+    if (!commonArr || commonArr.length === 0) return null;
+    return commonArr[Math.floor(Math.random() * commonArr.length)];
   }
 
   /**
@@ -174,13 +289,17 @@
     const prob = opts.probability ?? 0.65;
     if (Math.random() > prob) return;
 
-    const line = pickLine(category);
+    // 先确定发言者（决定台词是走专属池还是通用池）
+    const sp = opts.speaker || pickSpeaker(true);
+    if (!sp) return;
+
+    const line = pickLine(category, sp.nickname);
     if (!line) return;
 
     // 延迟触发，更像真人反应（300-1200ms）
     const delay = opts.delay ?? (300 + Math.random() * 900);
     setTimeout(() => {
-      showLocalDanmaku(line, opts.speaker);
+      showLocalDanmaku(line, sp);
     }, delay);
 
     lastFireAt = now;
