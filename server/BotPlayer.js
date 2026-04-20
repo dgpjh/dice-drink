@@ -72,19 +72,18 @@ class BotPlayer {
    * 叫数阶段决策
    */
   decideBidding(context) {
-    const { myDice, lastBid, totalDice, playerCount } = context;
+    const { myDice, lastBid, totalDice, playerCount, ruleSet, onesCalled } = context;
 
     // 第一次叫数
     if (!lastBid) {
-      return { action: 'bid', data: this.makeFirstBid(myDice, totalDice, playerCount) };
+      return { action: 'bid', data: this.makeFirstBid(myDice, totalDice, playerCount, ruleSet, onesCalled) };
     }
 
     // 分析上家叫数的可信度
-    const credibility = this.assessBidCredibility(myDice, lastBid, totalDice);
+    const credibility = this.assessBidCredibility(myDice, lastBid, totalDice, ruleSet, onesCalled);
 
     // 根据可信度决策
     if (credibility < 0.2) {
-      // 非常不可信 → 有概率劈或开
       const rand = Math.random();
       if (rand < 0.3 + this.style * 0.1) {
         return { action: 'challenge' };
@@ -93,19 +92,17 @@ class BotPlayer {
     }
 
     if (credibility < 0.4) {
-      // 不太可信 → 可能开骰
       if (Math.random() < 0.4 + this.style * 0.1) {
         return { action: 'open' };
       }
     }
 
     // 尝试继续叫数
-    const nextBid = this.makeNextBid(myDice, lastBid, totalDice, playerCount);
+    const nextBid = this.makeNextBid(myDice, lastBid, totalDice, playerCount, ruleSet, onesCalled);
     if (nextBid) {
       return { action: 'bid', data: nextBid };
     }
 
-    // 无法合理叫数，开骰
     return { action: 'open' };
   }
 
@@ -113,26 +110,22 @@ class BotPlayer {
    * 劈骰阶段决策（被劈后）
    */
   decideChallenge(context) {
-    const { myDice, lastBid, totalDice, challenge } = context;
+    const { myDice, lastBid, totalDice, challenge, ruleSet, onesCalled } = context;
 
     if (!challenge) return { action: 'challenge_open' };
 
-    const credibility = this.assessBidCredibility(myDice, lastBid, totalDice);
+    const credibility = this.assessBidCredibility(myDice, lastBid, totalDice, ruleSet, onesCalled);
 
-    // 如果倍数已经很高或已达上限，更倾向开骰
     if (challenge.count >= 3 || challenge.multiplier >= 8) {
       if (credibility > 0.5) {
-        // 叫数可信，开骰对自己不利 → 认输
         return { action: 'surrender' };
       }
       return { action: 'challenge_open' };
     }
 
-    // 根据可信度和风格决策
     if (credibility > 0.6) {
-      // 叫数很可能成立
       if (this.style === 0) {
-        return { action: 'surrender' }; // 保守认输
+        return { action: 'surrender' };
       }
       if (Math.random() < 0.5) {
         return { action: 'surrender' };
@@ -141,14 +134,12 @@ class BotPlayer {
     }
 
     if (credibility < 0.3) {
-      // 叫数不太可信 → 反劈或开
       if (this.style >= 1 && Math.random() < 0.4) {
         return { action: 'counter_challenge' };
       }
       return { action: 'challenge_open' };
     }
 
-    // 中等可信度
     const rand = Math.random();
     if (rand < 0.3) return { action: 'counter_challenge' };
     if (rand < 0.7) return { action: 'challenge_open' };
@@ -158,51 +149,50 @@ class BotPlayer {
   /**
    * 评估叫数的可信度 (0~1, 越高越可信)
    */
-  assessBidCredibility(myDice, bid, totalDice) {
+  assessBidCredibility(myDice, bid, totalDice, ruleSet = null, onesCalled = false) {
     if (!bid) return 1;
 
     const { quantity, value, mode } = bid;
 
-    // 自己手里有多少
-    const myResult = GameEngine.countDice(myDice, value, mode);
+    // 自己手里有多少（按 ruleSet 正确计数）
+    const effectiveMode = (ruleSet && ruleSet.hasFlyZhai === false) ? 'guo1' : mode;
+    const myResult = GameEngine.countDice(myDice, value, effectiveMode, ruleSet, { onesCalled });
     const myCount = myResult.count;
 
-    // 其他人骰子数
     const otherDice = totalDice - 5;
 
-    // 期望值：飞模式下每颗骰子有 2/6 概率命中(目标值+1), 斋模式下 1/6
+    // 1 是否在当前语境下充当万能（决定期望概率）
+    const oneWild = GameEngine.isOneWild(effectiveMode, value, ruleSet || {}, { onesCalled });
+
     let prob;
-    if (mode === 'fly' && value !== 1) {
-      prob = 2 / 6; // 飞模式下 1 也算
+    if (oneWild) {
+      prob = 2 / 6; // 1 + 目标点
     } else {
-      prob = 1 / 6; // 斋模式
+      prob = 1 / 6;
     }
 
     const expectedFromOthers = otherDice * prob;
     const expectedTotal = myCount + expectedFromOthers;
 
-    // 叫的数量 vs 期望值
-    if (quantity <= expectedTotal * 0.8) return 0.9; // 非常可信
+    if (quantity <= expectedTotal * 0.8) return 0.9;
     if (quantity <= expectedTotal) return 0.7;
     if (quantity <= expectedTotal * 1.2) return 0.5;
     if (quantity <= expectedTotal * 1.5) return 0.3;
-    return 0.1; // 非常不可信
+    return 0.1;
   }
 
   /**
    * 第一次叫数
    */
-  makeFirstBid(myDice, totalDice, playerCount) {
-    // 统计自己骰子
+  makeFirstBid(myDice, totalDice, playerCount, ruleSet = null, onesCalled = false) {
     const counts = {};
     for (const d of myDice) {
       counts[d] = (counts[d] || 0) + 1;
     }
 
-    // 获取起叫规则
-    const minBid = GameEngine.getMinBidByPlayerCount(playerCount || 2);
+    const pc = playerCount || 2;
+    const minBid = GameEngine.getMinBidByPlayerCount(pc);
 
-    // 找自己最多的点数（优先非1）
     let bestValue = 2;
     let bestCount = 0;
     for (let v = 2; v <= 6; v++) {
@@ -212,17 +202,36 @@ class BotPlayer {
       }
     }
 
-    // 基于自己手牌叫一个合理的数
-    // 飞模式下加上1的数量
-    const onesCount = counts[1] || 0;
+    // ==== guo1 无飞斋模式 ====
+    if (ruleSet && ruleSet.hasFlyZhai === false) {
+      const oneWild = GameEngine.isOneWild('guo1', bestValue, ruleSet, { onesCalled });
+      const onesCount = oneWild ? (counts[1] || 0) : 0;
+      const myTotal = bestCount + onesCount;
+
+      const otherDice = totalDice - 5;
+      const expectedOthers = Math.floor(otherDice * (oneWild ? 2 : 1) / 6);
+
+      let quantity = Math.max(minBid.guo1Other, myTotal + Math.floor(expectedOthers * 0.5));
+      quantity += (Math.random() < 0.3 ? 1 : 0);
+      quantity = Math.max(minBid.guo1Other, Math.min(quantity, totalDice));
+
+      return {
+        quantity,
+        value: bestValue,
+        mode: 'guo1'
+      };
+    }
+
+    // ==== 有飞斋模式 ====
+    // 飞模式下，根据规则决定 1 是否当癞子
+    const oneWild = GameEngine.isOneWild('fly', bestValue, ruleSet || {}, { onesCalled });
+    const onesCount = oneWild ? (counts[1] || 0) : 0;
     const myTotal = bestCount + onesCount;
 
-    // 期望其他人也有一些
     const otherDice = totalDice - 5;
-    const expectedOthers = Math.floor(otherDice * 2 / 6); // 飞模式期望
+    const expectedOthers = Math.floor(otherDice * (oneWild ? 2 : 1) / 6);
 
     let quantity = Math.max(minBid.fly, myTotal + Math.floor(expectedOthers * 0.5));
-    // 加一点随机性
     quantity += (Math.random() < 0.3 ? 1 : 0);
     quantity = Math.max(minBid.fly, Math.min(quantity, totalDice));
 
@@ -236,32 +245,96 @@ class BotPlayer {
   /**
    * 继续叫数（比上一次更大）
    */
-  makeNextBid(myDice, lastBid, totalDice, playerCount) {
+  makeNextBid(myDice, lastBid, totalDice, playerCount, ruleSet = null, onesCalled = false) {
     const counts = {};
     for (const d of myDice) {
       counts[d] = (counts[d] || 0) + 1;
     }
 
-    const onesCount = counts[1] || 0;
     const pc = playerCount || 2;
-
-    // 策略1: 同模式加数量
     const candidates = [];
+    const ctx = { onesCalled };
 
-    // 尝试同模式加 1
+    // ==== guo1 无飞斋模式 ====
+    if (ruleSet && ruleSet.hasFlyZhai === false) {
+      const minBid = GameEngine.getMinBidByPlayerCount(pc);
+
+      // 策略A：数量+1，同点数
+      const plusOneBid = {
+        quantity: lastBid.quantity + 1,
+        value: lastBid.value,
+        mode: 'guo1'
+      };
+      const v1 = GameEngine.validateBid(lastBid, plusOneBid, pc, ruleSet, ctx);
+      if (v1.valid && this.isBidReasonable(myDice, plusOneBid, totalDice, ruleSet, onesCalled)) {
+        candidates.push(plusOneBid);
+      }
+
+      // 策略B：同数量，更大点数（2<3<4<5<6<1）
+      const sortedValues = [2, 3, 4, 5, 6, 1];
+      for (const v of sortedValues) {
+        if (GameEngine.diceRank(v) > GameEngine.diceRank(lastBid.value)) {
+          const bid = {
+            quantity: lastBid.quantity,
+            value: v,
+            mode: 'guo1'
+          };
+          const val = GameEngine.validateBid(lastBid, bid, pc, ruleSet, ctx);
+          if (val.valid && this.isBidReasonable(myDice, bid, totalDice, ruleSet, onesCalled)) {
+            candidates.push(bid);
+          }
+        }
+      }
+
+      // 策略C：叫自己手上多的点数（数量+1）
+      for (let v = 2; v <= 6; v++) {
+        const oneWild = GameEngine.isOneWild('guo1', v, ruleSet, ctx);
+        const myCount = (counts[v] || 0) + (oneWild ? (counts[1] || 0) : 0);
+        if (myCount >= 2) {
+          const bid = {
+            quantity: lastBid.quantity + 1,
+            value: v,
+            mode: 'guo1'
+          };
+          const val = GameEngine.validateBid(lastBid, bid, pc, ruleSet, ctx);
+          if (val.valid && this.isBidReasonable(myDice, bid, totalDice, ruleSet, onesCalled)) {
+            candidates.push(bid);
+          }
+        }
+      }
+
+      // 策略D：叫 1 重置（若 onesCalled 尚未触发 且 手里 1 多 且 起叫数不太离谱）
+      if (!onesCalled && ruleSet.oneCallResetQuantity && (counts[1] || 0) >= 2) {
+        const bid = {
+          quantity: minBid.guo1One,
+          value: 1,
+          mode: 'guo1'
+        };
+        const val = GameEngine.validateBid(lastBid, bid, pc, ruleSet, ctx);
+        if (val.valid && this.isBidReasonable(myDice, bid, totalDice, ruleSet, onesCalled)) {
+          candidates.push(bid);
+        }
+      }
+
+      if (candidates.length === 0) return null;
+      return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+
+    // ==== 有飞斋模式 ====
+    // 同模式加 1
     const sameModeBid = {
       quantity: lastBid.quantity + 1,
       value: lastBid.value,
       mode: lastBid.mode
     };
-    if (this.isBidReasonable(myDice, sameModeBid, totalDice)) {
-      const validation = GameEngine.validateBid(lastBid, sameModeBid, pc);
+    if (this.isBidReasonable(myDice, sameModeBid, totalDice, ruleSet, onesCalled)) {
+      const validation = GameEngine.validateBid(lastBid, sameModeBid, pc, ruleSet, ctx);
       if (validation.valid) {
         candidates.push(sameModeBid);
       }
     }
 
-    // 尝试同数量更大点数
+    // 同数量更大点数
     const sortedValues = [2, 3, 4, 5, 6, 1];
     for (const v of sortedValues) {
       if (GameEngine.diceRank(v) > GameEngine.diceRank(lastBid.value)) {
@@ -270,24 +343,25 @@ class BotPlayer {
           value: v,
           mode: v === 1 ? 'zhai' : lastBid.mode
         };
-        const validation = GameEngine.validateBid(lastBid, bid, pc);
-        if (validation.valid && this.isBidReasonable(myDice, bid, totalDice)) {
+        const validation = GameEngine.validateBid(lastBid, bid, pc, ruleSet, ctx);
+        if (validation.valid && this.isBidReasonable(myDice, bid, totalDice, ruleSet, onesCalled)) {
           candidates.push(bid);
         }
       }
     }
 
-    // 尝试叫自己手上多的点数（加数量）
+    // 叫自己手上多的点数
     for (let v = 2; v <= 6; v++) {
-      const myCount = (counts[v] || 0) + onesCount;
+      const oneWild = GameEngine.isOneWild('fly', v, ruleSet || {}, ctx);
+      const myCount = (counts[v] || 0) + (oneWild ? (counts[1] || 0) : 0);
       if (myCount >= 2) {
         const bid = {
           quantity: lastBid.quantity + 1,
           value: v,
           mode: 'fly'
         };
-        const validation = GameEngine.validateBid(lastBid, bid, pc);
-        if (validation.valid && this.isBidReasonable(myDice, bid, totalDice)) {
+        const validation = GameEngine.validateBid(lastBid, bid, pc, ruleSet, ctx);
+        if (validation.valid && this.isBidReasonable(myDice, bid, totalDice, ruleSet, onesCalled)) {
           candidates.push(bid);
         }
       }
@@ -295,16 +369,14 @@ class BotPlayer {
 
     if (candidates.length === 0) return null;
 
-    // 从候选中随机选一个
     return candidates[Math.floor(Math.random() * candidates.length)];
   }
 
   /**
    * 判断叫数是否合理（不会太离谱）
    */
-  isBidReasonable(myDice, bid, totalDice) {
-    const credibility = this.assessBidCredibility(myDice, bid, totalDice);
-    // 保守风格要 credibility > 0.4，激进可以低到 0.2
+  isBidReasonable(myDice, bid, totalDice, ruleSet = null, onesCalled = false) {
+    const credibility = this.assessBidCredibility(myDice, bid, totalDice, ruleSet, onesCalled);
     const threshold = 0.4 - this.style * 0.1;
     return credibility >= threshold;
   }

@@ -9,6 +9,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const Room = require('./Room');
 const BotPlayer = require('./BotPlayer');
+const { createRuleSet, listPresets, listSingleBehaviors } = require('./rules');
 
 const app = express();
 const server = http.createServer(app);
@@ -27,6 +28,15 @@ app.use(express.static(path.join(__dirname, '..', 'public'), {
     }
   }
 }));
+
+// 规则预设列表（前端创房时拉取）
+app.get('/api/rules', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({
+    presets: listPresets(),
+    singleBehaviors: listSingleBehaviors()
+  }));
+});
 
 // 编码诊断端点（部署后可通过 /debug-encoding 检查编码是否正常）
 app.get('/debug-encoding', (req, res) => {
@@ -237,7 +247,9 @@ function executeBotAction(roomCode, botPlayerId) {
     totalDice: room.playerOrder.length * 5,
     playerCount: room.playerOrder.length,
     phase: room.phase,
-    challenge: room.currentGame?.challenge || null
+    challenge: room.currentGame?.challenge || null,
+    ruleSet: room.ruleSet,
+    onesCalled: !!(room.currentGame && room.currentGame.onesCalled)
   };
 
   const decision = bot.decide(context);
@@ -375,8 +387,11 @@ wss.on('connection', (ws) => {
         playerId = data.playerId || uuidv4();
         const nickname = data.nickname || '玩家1';
         const maxPlayers = Math.min(Math.max(parseInt(data.maxPlayers) || 2, 2), 4);
+        const presetId = data.preset || 'classic';
+        const singleBehavior = data.singleBehavior || 'zero';
+        const ruleSet = createRuleSet(presetId, singleBehavior);
         const roomCode = generateRoomCode();
-        const room = new Room(roomCode, playerId, maxPlayers);
+        const room = new Room(roomCode, playerId, maxPlayers, ruleSet);
         rooms[roomCode] = room;
         room.addPlayer(playerId, nickname, ws);
         playerRooms[playerId] = roomCode;
@@ -389,10 +404,11 @@ wss.on('connection', (ws) => {
             playerId,
             nickname,
             maxPlayers,
+            ruleSet,
             roomInfo: room.getRoomInfo()
           }
         }));
-        console.log(`[Room] ${nickname} 创建房间 ${roomCode}（${maxPlayers}人）`);
+        console.log(`[Room] ${nickname} 创建房间 ${roomCode}（${maxPlayers}人, ${ruleSet.presetName}, 单骰:${ruleSet.singleBehaviorName}）`);
         break;
       }
 

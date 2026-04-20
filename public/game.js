@@ -17,6 +17,13 @@ const state = {
   maxPlayers: 2,
   selectedMaxPlayers: 2,
 
+  // 规则集
+  ruleSet: null,             // 当前房间规则（创房后由服务端下发）
+  selectedPreset: 'classic', // 创房时选中的预设
+  selectedSingleBehavior: 'zero', // 创房时选中的单骰行为
+  rulesCatalog: null,        // 拉取到的预设/单骰行为列表缓存
+  onesCalled: false,         // 本局是否已有人叫过1（过1不癞规则用）
+
   // 起叫规则（根据人数动态设置）
   minBidRules: { fly: 3, zhai: 3, one: 2 },
 
@@ -121,17 +128,22 @@ function sendMsg(type, data = {}) {
 
 /**
  * 根据玩家人数更新起叫规则
- * 2人: 飞3个, 斋3个, 1点2个
- * 3人: 飞5个, 斋4个, 1点3个
- * 4人: 飞7个, 斋5个, 1点4个
+ * 2人: 飞3个, 斋3个, 1点2个；guo1：1→2, 非1→3
+ * 3人: 飞5个, 斋4个, 1点3个；guo1：1→3, 非1→5
+ * 4人: 飞7个, 斋5个, 1点4个；guo1：1→4, 非1→7
  */
 function updateMinBidRules(playerCount) {
   const rules = {
-    2: { fly: 3, zhai: 3, one: 2 },
-    3: { fly: 5, zhai: 4, one: 3 },
-    4: { fly: 7, zhai: 5, one: 4 }
+    2: { fly: 3, zhai: 3, one: 2, guo1One: 2, guo1Other: 3 },
+    3: { fly: 5, zhai: 4, one: 3, guo1One: 3, guo1Other: 5 },
+    4: { fly: 7, zhai: 5, one: 4, guo1One: 4, guo1Other: 7 }
   };
   state.minBidRules = rules[playerCount] || rules[2];
+}
+
+// 判断当前是否 guo1 无飞斋模式
+function isGuo1Mode() {
+  return state.ruleSet && state.ruleSet.hasFlyZhai === false;
 }
 
 /**
@@ -162,6 +174,7 @@ function handleMessage(msg) {
       state.roomCode = data.roomCode;
       state.nickname = data.nickname;
       state.maxPlayers = data.maxPlayers || 2;
+      if (data.ruleSet) state.ruleSet = data.ruleSet;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -171,6 +184,7 @@ function handleMessage(msg) {
       state.roomCode = data.roomCode;
       state.nickname = data.nickname;
       state.maxPlayers = data.roomInfo?.maxPlayers || 2;
+      if (data.roomInfo?.ruleSet) state.ruleSet = data.roomInfo.ruleSet;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -178,6 +192,7 @@ function handleMessage(msg) {
     case 'player_info':
       state.opponent = data.opponent;
       state.stats = data.stats;
+      if (data.ruleSet) state.ruleSet = data.ruleSet;
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
         state.maxPlayers = data.maxPlayers || state.maxPlayers;
@@ -196,11 +211,17 @@ function handleMessage(msg) {
       state.challenge = null;
       state.phase = 'game';
       state.stats = data.stats;
+      state.onesCalled = false;
+      if (data.ruleSet) state.ruleSet = data.ruleSet;
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
       }
       if (data.minBidRules) {
         state.minBidRules = data.minBidRules;
+      }
+      // 显示本局摇骰阶段的单骰重摇事件
+      if (data.rerollEvents && data.rerollEvents.length) {
+        showRerollBanner(data.rerollEvents);
       }
       showGamePage(data);
       break;
@@ -210,6 +231,7 @@ function handleMessage(msg) {
       state.lastBid = data.bid;
       state.currentTurn = data.currentTurn;
       state.isMyTurn = data.currentTurn === state.playerId;
+      if (typeof data.onesCalled === 'boolean') state.onesCalled = data.onesCalled;
       updateBidHistory(data);
       updateActionArea();
       resetTimer();
@@ -397,20 +419,146 @@ function hideAllModals() {
   document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
 }
 
+// 更新对局界面的规则徽章
+function updateRulesetBadge() {
+  const container = document.querySelector('#page-game .game-container');
+  if (!container || !state.ruleSet) return;
+  let badge = document.getElementById('ruleset-badge');
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.id = 'ruleset-badge';
+    badge.className = 'ruleset-badge';
+    badge.title = '点击查看规则详情';
+    badge.addEventListener('click', () => {
+      const rs = state.ruleSet;
+      if (!rs) return;
+      const lines = (rs.presetDetail || []).map(d => `• ${d}`).join('\n');
+      showToast(`${rs.presetName} · 单骰:${rs.singleBehaviorName}\n${lines}`, 'success');
+    });
+    container.insertBefore(badge, container.firstChild);
+  }
+  const rs = state.ruleSet;
+  badge.innerHTML = `<span class="badge-icon">📜</span> ${rs.presetName} · 单骰${rs.singleBehaviorName}`;
+}
+
+// 显示单骰重摇 banner
+function showRerollBanner(events) {
+  if (!events || !events.length) return;
+  const latest = events[events.length - 1];
+  const name = latest.playerId === state.playerId ? '你' : (latest.nickname || '有人');
+  const banner = document.createElement('div');
+  banner.className = 'reroll-banner';
+  banner.textContent = `🎯 ${name} 摇到单骰！重摇中（${latest.streak}/${latest.maxStreak}）`;
+  document.body.appendChild(banner);
+  setTimeout(() => {
+    banner.style.transition = 'opacity 0.5s';
+    banner.style.opacity = '0';
+    setTimeout(() => banner.remove(), 500);
+  }, 2200);
+}
+
 // =============== 首页操作 ===============
 let pendingAction = null;
 
-// 创建房间 → 先选人数
-document.getElementById('btn-create-room').addEventListener('click', () => {
-  console.log('[UI] 点击创建房间，弹出选人数弹窗');
+// 创建房间 → 先选人数 + 玩法
+document.getElementById('btn-create-room').addEventListener('click', async () => {
+  console.log('[UI] 点击创建房间，弹出选人数/玩法弹窗');
   state.selectedMaxPlayers = 2;
   // 重置人数选择器
   document.querySelectorAll('.count-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.count === '2');
   });
   document.getElementById('total-dice-hint').textContent = '场上共 10 颗骰子';
+
+  // 拉取规则预设（有缓存就用缓存）
+  await ensureRulesCatalog();
+  renderPresetSelector();
+  renderSingleBehaviorSelector();
+
   showModal('modal-create');
 });
+
+// 拉取规则目录（仅一次）
+async function ensureRulesCatalog() {
+  if (state.rulesCatalog) return;
+  try {
+    const resp = await fetch('/api/rules');
+    state.rulesCatalog = await resp.json();
+  } catch (e) {
+    console.error('[Rules] 拉取失败，使用兜底', e);
+    state.rulesCatalog = {
+      presets: [
+        { id: 'classic', name: '经典飞斋', shortDesc: '+2/-1，1点飞时为癞', detail: [] }
+      ],
+      singleBehaviors: [
+        { id: 'zero', name: '归零', desc: '单骰直接归零' },
+        { id: 'normal', name: '正常', desc: '单骰按普通牌算' },
+        { id: 'reroll', name: '重摇', desc: '单骰重摇，连续3次判负' }
+      ]
+    };
+  }
+}
+
+function renderPresetSelector() {
+  const container = document.getElementById('preset-selector');
+  const detail = document.getElementById('preset-detail');
+  if (!container) return;
+
+  container.innerHTML = state.rulesCatalog.presets.map(p => `
+    <button class="preset-btn ${p.id === state.selectedPreset ? 'active' : ''}" data-preset="${p.id}">
+      <span class="preset-name">${p.name}</span>
+      <span class="preset-short">${p.shortDesc}</span>
+    </button>
+  `).join('');
+
+  updatePresetDetail();
+
+  container.onclick = (e) => {
+    const btn = e.target.closest('.preset-btn');
+    if (!btn) return;
+    state.selectedPreset = btn.dataset.preset;
+    container.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    updatePresetDetail();
+  };
+
+  function updatePresetDetail() {
+    const p = state.rulesCatalog.presets.find(x => x.id === state.selectedPreset);
+    if (!p || !detail) return;
+    detail.innerHTML = p.detail && p.detail.length
+      ? `<ul>${p.detail.map(d => `<li>${d}</li>`).join('')}</ul>`
+      : `<div>${p.shortDesc}</div>`;
+  }
+}
+
+function renderSingleBehaviorSelector() {
+  const container = document.getElementById('single-behavior-selector');
+  const detail = document.getElementById('single-behavior-detail');
+  if (!container) return;
+
+  container.innerHTML = state.rulesCatalog.singleBehaviors.map(b => `
+    <button class="sb-btn ${b.id === state.selectedSingleBehavior ? 'active' : ''}" data-sb="${b.id}">
+      <span class="sb-name">${b.name}</span>
+    </button>
+  `).join('');
+
+  updateDetail();
+
+  container.onclick = (e) => {
+    const btn = e.target.closest('.sb-btn');
+    if (!btn) return;
+    state.selectedSingleBehavior = btn.dataset.sb;
+    container.querySelectorAll('.sb-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    updateDetail();
+  };
+
+  function updateDetail() {
+    const b = state.rulesCatalog.singleBehaviors.find(x => x.id === state.selectedSingleBehavior);
+    if (!b || !detail) return;
+    detail.textContent = b.desc;
+  }
+}
 
 // 人数选择器
 document.getElementById('player-count-selector').addEventListener('click', (e) => {
@@ -480,7 +628,15 @@ function handleCreateRoom() {
   state.maxPlayers = state.selectedMaxPlayers;
   hideAllModals();
 
-  console.log('[创建房间]', { nickname, maxPlayers: state.maxPlayers, connected: state.connected });
+  const payload = {
+    nickname,
+    playerId: state.playerId,
+    maxPlayers: state.maxPlayers,
+    preset: state.selectedPreset,
+    singleBehavior: state.selectedSingleBehavior
+  };
+
+  console.log('[创建房间]', payload);
 
   if (!state.connected) {
     connectWS();
@@ -489,14 +645,14 @@ function handleCreateRoom() {
       attempts++;
       if (state.connected) {
         clearInterval(checkConnection);
-        sendMsg('create_room', { nickname, playerId: state.playerId, maxPlayers: state.maxPlayers });
+        sendMsg('create_room', payload);
       } else if (attempts > 50) {
         clearInterval(checkConnection);
         showToast('连接服务器失败，请刷新页面重试', 'error');
       }
     }, 100);
   } else {
-    sendMsg('create_room', { nickname, playerId: state.playerId, maxPlayers: state.maxPlayers });
+    sendMsg('create_room', payload);
   }
 }
 
@@ -651,6 +807,9 @@ function showGamePage(data) {
   document.getElementById('game-my-name').textContent = state.nickname;
   updateScoreDisplay();
 
+  // 更新规则徽章
+  updateRulesetBadge();
+
   // 渲染对手区域
   renderOpponentsArea();
 
@@ -666,9 +825,15 @@ function showGamePage(data) {
   document.getElementById('bid-list').innerHTML = '';
 
   // 重置选择器到合法初始值
-  state.selectedQuantity = state.minBidRules.fly;
-  state.selectedValue = 2;
-  state.selectedMode = 'fly';
+  if (isGuo1Mode()) {
+    state.selectedQuantity = state.minBidRules.guo1Other;
+    state.selectedValue = 2;
+    state.selectedMode = 'guo1';
+  } else {
+    state.selectedQuantity = state.minBidRules.fly;
+    state.selectedValue = 2;
+    state.selectedMode = 'fly';
+  }
   updateSelectors();
 }
 
@@ -804,11 +969,17 @@ function updateBidHistory(data) {
   for (const bid of data.bids) {
     const item = document.createElement('div');
     item.className = `bid-item ${bid.playerId === state.playerId ? 'mine' : 'theirs'}`;
-    const modeName = bid.mode === 'fly' ? '飞' : '斋';
-    const modeClass = bid.mode === 'fly' ? 'mode-tag-fly' : 'mode-tag-zhai';
+    // guo1 模式或 mode=guo1 → 不显示飞/斋标签
+    const isGuo1Bid = bid.mode === 'guo1' || isGuo1Mode();
+    let modeTagHtml = '';
+    if (!isGuo1Bid && bid.value !== 1) {
+      const modeName = bid.mode === 'fly' ? '飞' : '斋';
+      const modeClass = bid.mode === 'fly' ? 'mode-tag-fly' : 'mode-tag-zhai';
+      modeTagHtml = `<span class="${modeClass}">${modeName}</span>`;
+    }
     item.innerHTML = `
       <div class="bid-player">${bid.nickname}</div>
-      <div class="bid-content">${bid.quantity}个${bid.value} ${bid.value === 1 ? '' : `<span class="${modeClass}">${modeName}</span>`}</div>
+      <div class="bid-content">${bid.quantity}个${bid.value} ${modeTagHtml}</div>
     `;
     bidList.appendChild(item);
   }
@@ -884,9 +1055,39 @@ function getSortedValues() {
   return [2, 3, 4, 5, 6, 1];
 }
 
+// 根据 ruleSet 计算斋→飞最小数量
+function minQuantityZhaiToFly(prevQuantity) {
+  const rule = state.ruleSet?.conversion?.zhaiToFly || 'plus2';
+  if (rule === 'times2') return prevQuantity * 2;
+  return prevQuantity + 2;
+}
+
+// 根据 ruleSet 计算飞→斋最小数量
+function minQuantityFlyToZhai(prevQuantity) {
+  const rule = state.ruleSet?.conversion?.flyToZhai || 'minus1';
+  if (rule === 'halvePlus1') return Math.ceil(prevQuantity / 2) + 1;
+  return prevQuantity - 1;
+}
+
 function getMinQuantity(value, mode, lastBid) {
-  // 使用根据人数动态设置的起叫规则
   const rules = state.minBidRules;
+
+  // ==== guo1 无飞斋模式 ====
+  if (isGuo1Mode()) {
+    const baseMin = value === 1 ? rules.guo1One : rules.guo1Other;
+    if (!lastBid) return baseMin;
+    // 叫 1 的升华规则：onesCalled=false 时可直接用 guo1One 起叫（不受上家数量约束）
+    if (value === 1 && !state.onesCalled) {
+      return baseMin;
+    }
+    // 普通递增：更大数量 OR 同数量更大点数
+    if (isValueGreater(value, lastBid.value)) {
+      return Math.max(baseMin, lastBid.quantity);
+    }
+    return Math.max(baseMin, lastBid.quantity + 1);
+  }
+
+  // ==== 有飞斋模式 ====
   let baseMin;
   if (value === 1) {
     baseMin = rules.one;
@@ -910,11 +1111,9 @@ function getMinQuantity(value, mode, lastBid) {
       ruleMin = prev.quantity + 1;
     }
   } else if (prev.mode === 'zhai' && nextMode === 'fly') {
-    const minFlyQuantity = prev.quantity + 2;
-    ruleMin = minFlyQuantity;
+    ruleMin = minQuantityZhaiToFly(prev.quantity);
   } else if (prev.mode === 'fly' && nextMode === 'zhai') {
-    const minZhaiQuantity = prev.quantity - 1;
-    ruleMin = minZhaiQuantity;
+    ruleMin = minQuantityFlyToZhai(prev.quantity);
   } else {
     ruleMin = baseMin;
   }
@@ -924,6 +1123,27 @@ function getMinQuantity(value, mode, lastBid) {
 
 function getAvailableValues(quantity, mode, lastBid) {
   const available = [];
+
+  // ==== guo1 无飞斋模式 ====
+  if (isGuo1Mode()) {
+    for (let v = 1; v <= 6; v++) {
+      const minQ = getMinQuantity(v, 'guo1', lastBid);
+      if (quantity < minQ) continue;
+      if (lastBid) {
+        // 叫 1 升华规则：onesCalled=false 时，叫 1 直接合法（只要起叫数>=guo1One）
+        if (v === 1 && !state.onesCalled) {
+          available.push(v);
+          continue;
+        }
+        // 不能与上家相同（quantity+value）
+        if (quantity === lastBid.quantity && !isValueGreater(v, lastBid.value)) continue;
+      }
+      available.push(v);
+    }
+    return available;
+  }
+
+  // ==== 有飞斋模式 ====
   for (let v = 1; v <= 6; v++) {
     const testMode = (v === 1) ? 'zhai' : mode;
     const minQ = getMinQuantity(v, testMode, lastBid);
@@ -942,6 +1162,9 @@ function getAvailableValues(quantity, mode, lastBid) {
 }
 
 function getAvailableModes(quantity, value, lastBid) {
+  // guo1 模式没有飞/斋
+  if (isGuo1Mode()) return ['guo1'];
+
   if (value === 1) return ['zhai'];
 
   const modes = [];
@@ -962,6 +1185,21 @@ function getAvailableModes(quantity, value, lastBid) {
 }
 
 function isBidValid(quantity, value, mode, lastBid) {
+  // ==== guo1 无飞斋模式 ====
+  if (isGuo1Mode()) {
+    const rules = state.minBidRules;
+    const baseMin = value === 1 ? rules.guo1One : rules.guo1Other;
+    if (quantity < baseMin) return false;
+    if (!lastBid) return true;
+    // 升华叫 1（onesCalled=false）：满足起叫下限即可
+    if (value === 1 && !state.onesCalled) return true;
+    // 普通递增
+    if (quantity > lastBid.quantity) return true;
+    if (quantity === lastBid.quantity && isValueGreater(value, lastBid.value)) return true;
+    return false;
+  }
+
+  // ==== 有飞斋模式 ====
   const testMode = (value === 1) ? 'zhai' : mode;
   const rules = state.minBidRules;
   let baseMin;
@@ -985,21 +1223,29 @@ function isBidValid(quantity, value, mode, lastBid) {
     return false;
   }
   if (prev.mode === 'zhai' && testMode === 'fly') {
-    const minFlyQuantity = prev.quantity * 2 - 1;
-    return quantity >= minFlyQuantity;
+    return quantity >= minQuantityZhaiToFly(prev.quantity);
   }
   if (prev.mode === 'fly' && testMode === 'zhai') {
-    const minZhaiQuantity = Math.ceil((prev.quantity + 1) / 2);
-    return quantity >= minZhaiQuantity;
+    return quantity >= minQuantityFlyToZhai(prev.quantity);
   }
   return false;
 }
 
 function updateSelectors() {
   const lastBid = state.lastBid;
+  const guo1 = isGuo1Mode();
 
-  if (state.selectedValue === 1) {
+  // guo1 模式：强制 mode='guo1'；有飞斋模式下，叫 1 强制斋
+  if (guo1) {
+    state.selectedMode = 'guo1';
+  } else if (state.selectedValue === 1) {
     state.selectedMode = 'zhai';
+  }
+
+  // 飞斋按钮组在 guo1 模式下隐藏
+  const modeToggle = document.getElementById('mode-toggle');
+  if (modeToggle) {
+    modeToggle.style.display = guo1 ? 'none' : '';
   }
 
   const minQ = getMinQuantity(state.selectedValue, state.selectedMode, lastBid);
@@ -1027,24 +1273,27 @@ function updateSelectors() {
 
   if (!availableValues.includes(state.selectedValue) && availableValues.length > 0) {
     state.selectedValue = availableValues[0];
-    if (state.selectedValue === 1) state.selectedMode = 'zhai';
+    if (!guo1 && state.selectedValue === 1) state.selectedMode = 'zhai';
     updateSelectors();
     return;
   }
 
-  const availableModes = getAvailableModes(state.selectedQuantity, state.selectedValue, lastBid);
-  document.querySelectorAll('.mode-btn').forEach(btn => {
-    const m = btn.dataset.mode;
-    const isAvailable = availableModes.includes(m);
-    btn.classList.toggle('active', m === state.selectedMode);
-    btn.classList.toggle('disabled', !isAvailable);
-    btn.disabled = !isAvailable;
-  });
+  // guo1 模式跳过飞斋按钮联动
+  if (!guo1) {
+    const availableModes = getAvailableModes(state.selectedQuantity, state.selectedValue, lastBid);
+    document.querySelectorAll('.mode-btn').forEach(btn => {
+      const m = btn.dataset.mode;
+      const isAvailable = availableModes.includes(m);
+      btn.classList.toggle('active', m === state.selectedMode);
+      btn.classList.toggle('disabled', !isAvailable);
+      btn.disabled = !isAvailable;
+    });
 
-  if (!availableModes.includes(state.selectedMode) && availableModes.length > 0) {
-    state.selectedMode = availableModes[0];
-    updateSelectors();
-    return;
+    if (!availableModes.includes(state.selectedMode) && availableModes.length > 0) {
+      state.selectedMode = availableModes[0];
+      updateSelectors();
+      return;
+    }
   }
 
   const bidValid = isBidValid(state.selectedQuantity, state.selectedValue, state.selectedMode, lastBid);
@@ -1069,7 +1318,7 @@ document.getElementById('value-selector').addEventListener('click', (e) => {
   const btn = e.target.closest('.dice-val-btn');
   if (!btn || btn.disabled) return;
   state.selectedValue = parseInt(btn.dataset.val);
-  if (state.selectedValue === 1) state.selectedMode = 'zhai';
+  if (!isGuo1Mode() && state.selectedValue === 1) state.selectedMode = 'zhai';
   updateSelectors();
 });
 
@@ -1240,6 +1489,8 @@ function showSettlementPage(data) {
     titleEl.textContent = '⏱ 磨叽啥呢！';
   } else if (data.type === 'disconnect') {
     titleEl.textContent = '📡 跑路了？';
+  } else if (data.type === 'singleStreak') {
+    titleEl.textContent = '🎯 连摇单骰，判负！';
   } else {
     titleEl.textContent = '🎲 开！！！';
   }
@@ -1292,10 +1543,13 @@ function showSettlementPage(data) {
   detailsEl.innerHTML = '';
 
   if (data.type === 'open' && data.lastBid) {
-    const modeName = data.lastBid.mode === 'fly' ? '飞' : '斋';
-    const modeClass = data.lastBid.mode === 'fly' ? 'mode-tag-fly' : 'mode-tag-zhai';
-    const modeTag = data.lastBid.value === 1 ? '' : `<span class="${modeClass}">${modeName}</span>`;
-    
+    const isGuo1Bid = data.lastBid.mode === 'guo1';
+    let modeTag = '';
+    if (!isGuo1Bid && data.lastBid.value !== 1) {
+      const modeName = data.lastBid.mode === 'fly' ? '飞' : '斋';
+      const modeClass = data.lastBid.mode === 'fly' ? 'mode-tag-fly' : 'mode-tag-zhai';
+      modeTag = `<span class="${modeClass}">${modeName}</span>`;
+    }
     const openerName = data.opener === state.playerId ? state.nickname + '（你）' : (data.openerNickname || getPlayerName(data.opener));
     const lastBidderName = data.lastBidder === state.playerId ? state.nickname + '（你）' : (data.lastBidderNickname || getPlayerName(data.lastBidder));
     
@@ -1357,6 +1611,19 @@ function showSettlementPage(data) {
         <span class="detail-label">结算方式</span>
         <span class="detail-value">${data.disconnectedNickname} 断线超时</span>
       </div>
+    `;
+  } else if (data.type === 'singleStreak') {
+    const loserName = data.loser === state.playerId ? state.nickname + '（你）' : (data.loserNickname || getPlayerName(data.loser));
+    const eventsHtml = (data.rerollEvents || []).map(ev => {
+      const n = ev.playerId === state.playerId ? state.nickname + '（你）' : ev.nickname;
+      return `<div class="detail-row"><span class="detail-label">第${ev.streak}次单骰</span><span class="detail-value">${n}</span></div>`;
+    }).join('');
+    detailsEl.innerHTML = `
+      <div class="detail-row">
+        <span class="detail-label">结算方式</span>
+        <span class="detail-value">${loserName} 连续 ${data.maxStreak} 次摇到单骰</span>
+      </div>
+      ${eventsHtml}
     `;
   }
 
@@ -1468,6 +1735,7 @@ function handleGameStateRestore(data) {
   state.myDice = data.you.dice;
   state.stats = data.stats;
   state.maxPlayers = data.maxPlayers || 2;
+  if (data.ruleSet) state.ruleSet = data.ruleSet;
 
   if (data.playerOrder) {
     state.playerOrder = data.playerOrder;
@@ -1482,6 +1750,7 @@ function handleGameStateRestore(data) {
     state.lastBid = data.game.lastBid;
     state.challenge = data.game.challenge;
     state.currentTurn = data.game.currentTurn;
+    state.onesCalled = !!data.game.onesCalled;
   }
 
   if (data.phase === 'waiting') {
@@ -1520,7 +1789,7 @@ function handleGameStateRestore(data) {
 // =============== 工具函数 ===============
 function showToast(message, type = '') {
   const toast = document.getElementById('toast');
-  toast.textContent = message;
+  toast.innerText = message;
   toast.className = `toast show ${type}`;
   setTimeout(() => {
     toast.className = 'toast';

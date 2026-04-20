@@ -1352,6 +1352,162 @@ html, body {
   margin-bottom: 16px;
 }
 
+/* =============== 创房弹窗 - 玩法预设 & 单骰行为 =============== */
+.modal-create-content {
+  max-height: 88vh;
+  overflow-y: auto;
+  width: min(420px, 92vw);
+}
+
+.create-section {
+  margin-bottom: 18px;
+}
+
+.section-label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-tip {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--border);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: help;
+}
+
+.preset-selector,
+.single-behavior-selector {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.preset-btn,
+.sb-btn {
+  padding: 10px 12px;
+  border: 2px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.preset-btn .preset-name,
+.sb-btn .sb-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.preset-btn .preset-short,
+.sb-btn .sb-short {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.preset-btn.active,
+.sb-btn.active {
+  border-color: var(--primary);
+  background: rgba(108, 92, 231, 0.15);
+  box-shadow: 0 0 10px rgba(108, 92, 231, 0.35);
+}
+
+.preset-btn:hover:not(.active),
+.sb-btn:hover:not(.active) {
+  border-color: var(--primary-light);
+}
+
+.preset-detail,
+.single-behavior-detail {
+  background: var(--bg-tertiary, rgba(255,255,255,0.04));
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.preset-detail ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.preset-detail li {
+  margin: 2px 0;
+}
+
+/* 单骰行为的 3 个按钮横向排列 */
+.single-behavior-selector {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.sb-btn {
+  text-align: center;
+  padding: 10px 6px;
+}
+
+.sb-btn .sb-name {
+  font-size: 13px;
+}
+
+/* 游戏内规则标签（对局主界面顶部） */
+.ruleset-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: rgba(108, 92, 231, 0.12);
+  border: 1px solid rgba(108, 92, 231, 0.35);
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.ruleset-badge .badge-icon {
+  font-size: 13px;
+}
+
+/* 单骰重摇提示（toast 升级版） */
+.reroll-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #ff9f43, #ee5253);
+  color: #fff;
+  border-radius: 24px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 9999;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  animation: rerollBannerIn 0.3s ease-out;
+}
+
+@keyframes rerollBannerIn {
+  from { opacity: 0; transform: translate(-50%, -10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
 /* =============== 等待房间 - 多人列表 =============== */
 .player-item.other {
   border-color: var(--secondary);

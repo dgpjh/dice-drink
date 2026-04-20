@@ -55,7 +55,7 @@
         </div>
         <div class="version-info">
           <button id="btn-sound-toggle" class="sound-toggle" title="音效开关">🔊</button>
-          <span>v2.4.0</span>
+          <span>v2.5.1</span>
         </div>
       </div>
     </div>
@@ -71,17 +71,41 @@
       </div>
     </div>
 
-    <!-- 创建房间弹窗 - 选择人数 -->
+    <!-- 创建房间弹窗 - 选择人数 & 玩法 -->
     <div id="modal-create" class="modal">
-      <div class="modal-content">
+      <div class="modal-content modal-create-content">
         <h2>🏠 创建房间</h2>
-        <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 16px;">选择游戏人数</p>
-        <div class="player-count-selector" id="player-count-selector">
-          <button class="count-btn active" data-count="2">2人</button>
-          <button class="count-btn" data-count="3">3人</button>
-          <button class="count-btn" data-count="4">4人</button>
+
+        <div class="create-section">
+          <div class="section-label">游戏人数</div>
+          <div class="player-count-selector" id="player-count-selector">
+            <button class="count-btn active" data-count="2">2人</button>
+            <button class="count-btn" data-count="3">3人</button>
+            <button class="count-btn" data-count="4">4人</button>
+          </div>
+          <div class="total-dice-hint" id="total-dice-hint">场上共 10 颗骰子</div>
         </div>
-        <div class="total-dice-hint" id="total-dice-hint">场上共 10 颗骰子</div>
+
+        <div class="create-section">
+          <div class="section-label">玩法预设 <span class="section-tip" id="preset-tip">?</span></div>
+          <div class="preset-selector" id="preset-selector">
+            <!-- 动态填充 -->
+          </div>
+          <div class="preset-detail" id="preset-detail">
+            <!-- 动态填充当前预设说明 -->
+          </div>
+        </div>
+
+        <div class="create-section">
+          <div class="section-label">单骰处理</div>
+          <div class="single-behavior-selector" id="single-behavior-selector">
+            <!-- 动态填充 -->
+          </div>
+          <div class="single-behavior-detail" id="single-behavior-detail">
+            <!-- 当前单骰行为说明 -->
+          </div>
+        </div>
+
         <button class="btn btn-primary" id="btn-confirm-create-room">下一步</button>
         <button class="btn btn-ghost" id="btn-cancel-create">取消</button>
       </div>

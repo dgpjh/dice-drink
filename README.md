@@ -2,7 +2,7 @@
 
 > 经典酒桌游戏线上版！支持 2-4 人在线对战，摇骰子、叫数、开骰，输了就得喝 🍺
 
-**当前版本：v2.0.0**
+**当前版本：v2.5.0**
 
 ---
 
@@ -39,13 +39,21 @@ liars-dice/
 │   │                     #   - 功能：叫数、开骰、劈骰/反劈/认输、超时处理
 │   │                     #   - 断线重连（30秒超时）、房间倒计时（10分钟）
 │   │
-│   └── gameEngine.js     # 核心规则引擎（纯逻辑，无副作用）
-│                         #   - rollDice()：摇骰
-│                         #   - detectPattern()：牌型检测（单骰/豹子/纯豹）
-│                         #   - countDice()：骰子计数（飞/斋模式）
-│                         #   - validateBid()：叫数合法性验证
-│                         #   - resolveBid()：开骰判定
-│                         #   - calculateScore()：计分
+│   ├── gameEngine.js     # 核心规则引擎（纯逻辑，无副作用）
+│   │                     #   - rollDice()：摇骰
+│   │                     #   - detectPattern()：牌型检测（单骰/豹子/纯豹）
+│   │                     #   - countDice()：骰子计数（飞/斋模式，按 ruleSet 路由）
+│   │                     #   - validateBid()：叫数合法性验证
+│   │                     #   - resolveBid()：开骰判定
+│   │                     #   - calculateScore()：计分
+│   │                     #   - isOneWild()：判定 1 是否为万能（按预设/上下文）
+│   │
+│   ├── rules.js          # 玩法规则集定义（v2.5 新增）
+│   │                     #   - PRESETS：经典飞斋 / 过1不癞 / 北派倍率
+│   │                     #   - SINGLE_BEHAVIORS：归零 / 正常 / 重摇
+│   │                     #   - createRuleSet() / listPresets() / listSingleBehaviors()
+│   │
+│   └── BotPlayer.js      # AI 机器人（按 ruleSet 调整估算）
 │
 ├── public/               # === 前端 ===
 │   ├── index.html        # 页面结构（首页/等待/对局/结算/规则 5个页面）
@@ -93,16 +101,20 @@ liars-dice/
 
 - ✅ 2-4人在线实时对战
 - ✅ 创建房间时可选人数（2/3/4人）
+- ✅ **可配置玩法预设**（v2.5）：经典飞斋 / 过1不癞 / 北派倍率（×2 / ÷2+1）
+- ✅ **单骰行为三选一**（v2.5）：归零 / 正常 / 重摇（连摇 3 次单骰判负）
 - ✅ 完整骰子规则（飞/斋、斋飞转换、豹子/纯豹/单骰）
 - ✅ 多人轮转叫数 → 开骰 → 结算完整流程
 - ✅ 劈骰系统（劈/反劈/认输，最多3次，倍数 ×2/×4/×8）
+- ✅ AI 机器人陪玩（支持 2-4 人任意补位）
 - ✅ 30秒操作超时自动判负
 - ✅ 断线重连（30秒内自动恢复对局状态）
 - ✅ 房间分享（6位房间码 + 邀请链接）
 - ✅ 社交平台分享卡片（微信/QQ 预览优化）
 - ✅ 弹幕聊天
 - ✅ 欠杯数统计 + 连败彩蛋
-- ✅ 骰子摇动动画
+- ✅ 骰子摇动动画 + 3D 翻滚 / 震屏闪白 / AirHorn 音效（v2.4）
+- ✅ 损友吐槽系统 + 胜负骚话随机文案（v2.4）
 
 ---
 
@@ -162,6 +174,10 @@ pm2 save
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v2.5.1 | 2026-04-20 | **"过1不癞"重做**：改为无飞斋纯数字叫法；叫"N个1"作为升华叫法可重置起叫数；叫 1 后全局 1 不再当癞；前端对 guo1 模式自动隐藏飞斋切换按钮 |
+| v2.5.0 | 2026-04-20 | **可配置玩法**：创房可选"经典飞斋/过1不癞/北派倍率"三种预设；单骰行为独立开关（归零/正常/重摇连3判负）；规则引擎重构（`server/rules.js`）；Bot 按规则集调整估算 |
+| v2.4.0 | 2026-04-18 | **00后酒吧损友风**：Y2K 霓虹配色、赛博网格背景、3D骰子翻滚、震屏闪白、AirHorn 音效、损友吐槽系统、胜负骚话随机化 |
+| v2.1.0 | 2026-04-17 | AI 机器人（Bot）陪玩：支持 2-4 人任意补位 |
 | v2.0.0 | 2026-04-17 | **多人模式**：支持 2-4 人对战，创建房间可选人数，多人轮转叫数 |
 | v1.2.1 | 2026-04-17 | 添加 README 和 RULES 文档 |
 | v1.0.0 | — | 初始版本：基本双人对战功能 |
@@ -174,7 +190,7 @@ pm2 save
 
 | 消息类型 | 说明 | 关键字段 |
 |---------|------|---------|
-| `create_room` | 创建房间 | `nickname`, `playerId`, `maxPlayers` |
+| `create_room` | 创建房间 | `nickname`, `playerId`, `maxPlayers`, `preset`, `singleBehavior` |
 | `join_room` | 加入房间 | `roomCode`, `nickname`, `playerId` |
 | `bid` | 叫数 | `quantity`, `value`, `mode` |
 | `open` | 开骰 | — |
@@ -202,5 +218,17 @@ pm2 save
 | `timer_start` | 倒计时开始 |
 | `chat_message` | 聊天消息 |
 | `opponent_disconnected` / `opponent_reconnected` | 对手断线/重连 |
-| `game_state` | 完整状态（重连用） |
+| `game_state` | 完整状态（重连用，含 `ruleSet`） |
 | `error` | 错误提示 |
+
+> v2.5 起，`room_created` / `room_joined` / `player_info` / `game_start` / `game_state` 均携带 `ruleSet` 字段（含 `preset`、`singleBehavior`、`oneAsWildMode`、`zhaiToFly`、`flyToZhai` 等），前端据此动态渲染规则徽章与叫数合法性。`bid_made` 新增 `onesCalled` 标志，用于"过1不癞"模式下切换 1 是否当癞。`game_settled` 新增 `type: 'singleStreak'` 分支，用于单骰重摇模式下连续 3 次单骰直接判负。
+
+---
+
+## 🌐 HTTP 端点
+
+| 路径 | 方法 | 说明 |
+|------|------|------|
+| `/` | GET | 首页（静态） |
+| `/room/:roomCode` | GET | 房间分享链接（动态 meta 标签） |
+| `/api/rules` | GET | 返回所有可选玩法预设与单骰行为：`{ presets, singleBehaviors }` |

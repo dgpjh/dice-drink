@@ -1,8 +1,9 @@
 /**
  * 大话骰 - 房间管理（支持2-4人）
- * 包含：房间创建/加入、游戏状态机、超时处理、断线重连
+ * 包含：房间创建/加入、游戏状态机、超时处理、断线重连、可配置规则集
  */
 const GameEngine = require('./gameEngine');
+const { createRuleSet } = require('./rules');
 
 // 游戏阶段
 const PHASE = {
@@ -15,11 +16,14 @@ const PHASE = {
 };
 
 class Room {
-  constructor(roomCode, hostPlayerId, maxPlayers = 2) {
+  constructor(roomCode, hostPlayerId, maxPlayers = 2, ruleSet = null) {
     this.roomCode = roomCode;
     this.createdAt = Date.now();
     this.phase = PHASE.WAITING;
     this.maxPlayers = Math.min(Math.max(maxPlayers, 2), 4); // 限制2-4人
+
+    // 规则集
+    this.ruleSet = ruleSet || createRuleSet();
 
     // 玩家
     this.players = {};  // { playerId: { id, nickname, ws, dice, connected, disconnectedAt } }
@@ -72,7 +76,7 @@ class Room {
       disconnectedAt: null
     };
     this.playerOrder.push(playerId);
-    this.stats[playerId] = { wins: 0, losses: 0, totalScore: 0, streak: 0 };
+    this.stats[playerId] = { wins: 0, losses: 0, totalScore: 0, streak: 0, singleStreak: 0 };
 
     // 人满，清除房间超时
     if (this.playerOrder.length === this.maxPlayers) {
@@ -136,6 +140,7 @@ class Room {
           connected: this.players[id].connected
         })),
         maxPlayers: this.maxPlayers,
+        ruleSet: this.ruleSet,
         stats: this.stats
       });
     }
@@ -148,23 +153,50 @@ class Room {
 
     this.phase = PHASE.ROLLING;
 
-    // 摇骰
+    // 摇骰（含单骰重摇逻辑）
     const dice = {};
+    const rerollEvents = [];        // 广播给客户端做提示
+    let singleLoser = null;          // 连续单骰判负的玩家
+    const maxStreak = this.ruleSet.singleRerollMaxStreak || 3;
+
     for (const pid of this.playerOrder) {
-      dice[pid] = GameEngine.rollDice(5);
-      this.players[pid].dice = dice[pid];
+      let rolled = GameEngine.rollDice(5);
+
+      if (this.ruleSet.singleBehavior === 'reroll') {
+        // 单骰重摇：每次摇到单骰累加 singleStreak，到上限判负；本局最终非单骰则重置
+        while (GameEngine.detectPattern(rolled).type === 'single') {
+          this.stats[pid].singleStreak = (this.stats[pid].singleStreak || 0) + 1;
+          rerollEvents.push({
+            playerId: pid,
+            nickname: this.players[pid].nickname,
+            streak: this.stats[pid].singleStreak,
+            maxStreak
+          });
+          if (this.stats[pid].singleStreak >= maxStreak) {
+            singleLoser = pid;
+            break;
+          }
+          rolled = GameEngine.rollDice(5);
+        }
+        // 本局最终未单骰 → 重置连续计数
+        if (!singleLoser && GameEngine.detectPattern(rolled).type !== 'single') {
+          this.stats[pid].singleStreak = 0;
+        }
+      }
+
+      dice[pid] = rolled;
+      this.players[pid].dice = rolled;
+
+      if (singleLoser) break;  // 有人连续单骰判负，后面的人不用摇了
     }
 
     // 决定先手
     let firstPlayer;
     if (!this.currentGame || !this.currentGame.loser) {
-      // 首局随机
       const randomIdx = Math.floor(Math.random() * this.playerOrder.length);
       firstPlayer = this.playerOrder[randomIdx];
     } else {
-      // 后续局：输家先叫
       firstPlayer = this.currentGame.loser;
-      // 如果输家不在列表中（可能断线被移除），随机选
       if (!this.playerOrder.includes(firstPlayer)) {
         firstPlayer = this.playerOrder[Math.floor(Math.random() * this.playerOrder.length)];
       }
@@ -176,14 +208,20 @@ class Room {
       currentTurn: firstPlayer,
       lastBidder: null,
       lastBid: null,
-      // 劈骰状态
-      challenge: null,  // { initiator, target, multiplier, count }
-      // 结果
+      onesCalled: false,  // 本局是否叫过1点（过1不癞规则用）
+      challenge: null,
       result: null,
       winner: null,
       loser: null,
-      score: 0
+      score: 0,
+      rerollEvents
     };
+
+    // 若有人连续单骰达到上限，直接判负结算
+    if (singleLoser) {
+      this.handleSingleStreakLoss(singleLoser, rerollEvents);
+      return;
+    }
 
     this.phase = PHASE.BIDDING;
 
@@ -195,6 +233,8 @@ class Room {
         currentTurn: firstPlayer,
         phase: this.phase,
         stats: this.stats,
+        ruleSet: this.ruleSet,
+        rerollEvents,
         playerOrder: this.playerOrder.map(id => ({
           id,
           nickname: this.players[id].nickname
@@ -204,8 +244,62 @@ class Room {
       });
     }
 
-    // 开始回合计时
     this.startTurnTimeout();
+  }
+
+  /**
+   * 连续单骰达到上限判负
+   */
+  handleSingleStreakLoss(loserPlayerId, rerollEvents) {
+    const winners = this.playerOrder.filter(pid => pid !== loserPlayerId);
+    const winner = winners[0]; // 多人情况下第一个作为胜方（战绩上其他人都是"未输"）
+    const score = 1;
+
+    this.currentGame.winner = winner;
+    this.currentGame.loser = loserPlayerId;
+    this.currentGame.score = score;
+    this.currentGame.result = {
+      type: 'singleStreak',
+      loserScore: score
+    };
+
+    // 更新战绩：输家 +1 负，每位未输玩家都 +1 胜（和普通结算对齐，只加给 winner 一人避免重复计胜）
+    this.stats[winner].wins += 1;
+    this.stats[loserPlayerId].losses += 1;
+    this.stats[loserPlayerId].totalScore += score;
+    this.stats[loserPlayerId].streak = (this.stats[loserPlayerId].streak || 0) + 1;
+    this.stats[winner].streak = 0;
+    // 重置输家的连续单骰计数，下一局重新来
+    this.stats[loserPlayerId].singleStreak = 0;
+
+    this.phase = PHASE.SETTLING;
+
+    const allDice = {};
+    for (const pid of this.playerOrder) {
+      allDice[pid] = {
+        dice: this.players[pid].dice,
+        nickname: this.players[pid].nickname,
+        pattern: GameEngine.detectPattern(this.players[pid].dice)
+      };
+    }
+
+    this.broadcast('game_settled', {
+      type: 'singleStreak',
+      loser: loserPlayerId,
+      loserNickname: this.players[loserPlayerId].nickname,
+      winner,
+      winnerNickname: this.players[winner].nickname,
+      maxStreak: this.ruleSet.singleRerollMaxStreak || 3,
+      rerollEvents,
+      score,
+      allDice,
+      stats: this.stats,
+      phase: this.phase,
+      playerOrder: this.playerOrder.map(id => ({
+        id,
+        nickname: this.players[id].nickname
+      }))
+    });
   }
 
   /**
@@ -219,13 +313,21 @@ class Room {
       return { success: false, reason: '不是你的回合' };
     }
 
-    // 叫1默认斋
-    if (bid.value === 1) {
+    // 飞斋规则下：叫1默认斋；无飞斋规则下：强制 mode='guo1'
+    if (this.ruleSet.hasFlyZhai === false) {
+      bid.mode = 'guo1';
+    } else if (bid.value === 1) {
       bid.mode = 'zhai';
     }
 
-    // 验证叫数合法性（传入玩家人数）
-    const validation = GameEngine.validateBid(this.currentGame.lastBid, bid, this.playerOrder.length);
+    // 验证叫数合法性（传入玩家人数 + 规则集 + onesCalled 上下文）
+    const validation = GameEngine.validateBid(
+      this.currentGame.lastBid,
+      bid,
+      this.playerOrder.length,
+      this.ruleSet,
+      { onesCalled: this.currentGame.onesCalled }
+    );
     if (!validation.valid) {
       return { success: false, reason: validation.reason };
     }
@@ -240,6 +342,13 @@ class Room {
     this.currentGame.lastBid = bid;
     this.currentGame.lastBidder = playerId;
 
+    // 过1不癞规则：
+    //   - hasFlyZhai=false (guo1): 叫过1后 1 不再当癞
+    //   - 其他 afterCalled1（兼容历史）：叫过1后 1 才当癞
+    if (bid.value === 1) {
+      this.currentGame.onesCalled = true;
+    }
+
     // 切换到下一位玩家
     const nextPlayer = this.getNextPlayer(playerId);
     this.currentGame.currentTurn = nextPlayer;
@@ -251,6 +360,7 @@ class Room {
       bid,
       bids: this.currentGame.bids,
       currentTurn: nextPlayer,
+      onesCalled: this.currentGame.onesCalled,
       phase: this.phase
     });
 
@@ -461,7 +571,12 @@ class Room {
       allPlayerDice[pid] = this.players[pid].dice;
     }
 
-    const result = GameEngine.resolveBid(allPlayerDice, lastBid);
+    const result = GameEngine.resolveBid(
+      allPlayerDice,
+      lastBid,
+      this.ruleSet,
+      { onesCalled: this.currentGame.onesCalled }
+    );
 
     // 判定输赢（开的人 vs 上一位叫数者）
     let winner, loser;
@@ -776,6 +891,7 @@ class Room {
       roomCode: this.roomCode,
       phase: this.phase,
       maxPlayers: this.maxPlayers,
+      ruleSet: this.ruleSet,
       you: {
         id: playerId,
         nickname: this.players[playerId].nickname,
@@ -810,6 +926,7 @@ class Room {
         lastBid: this.currentGame.lastBid,
         lastBidder: this.currentGame.lastBidder,
         currentTurn: this.currentGame.currentTurn,
+        onesCalled: this.currentGame.onesCalled || false,
         challenge: this.currentGame.challenge,
         result: this.currentGame.result
       };
@@ -856,6 +973,7 @@ class Room {
       roomCode: this.roomCode,
       phase: this.phase,
       maxPlayers: this.maxPlayers,
+      ruleSet: this.ruleSet,
       players: this.playerOrder.map(pid => ({
         id: pid,
         nickname: this.players[pid].nickname,
