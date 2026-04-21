@@ -235,15 +235,22 @@
     },
   };
 
-  // 机器人发言用的"其他玩家"昵称（从 playerOrder 里随机挑一个非自己的）
-  function pickSpeaker(excludeMe = true) {
+  // 判断一个 player 是否是机器人（id 以 bot_ 开头 或 昵称含 🤖）
+  function isBot(p) {
+    if (!p) return false;
+    if (p.id && String(p.id).startsWith('bot_')) return true;
+    if (p.nickname && String(p.nickname).startsWith('🤖')) return true;
+    return false;
+  }
+
+  // 从场上所有"机器人"里挑一个发言者（只有机器人才会主动发弹幕）
+  // excludeId: 要排除的 playerId（比如当前动作者本人，不让他自说自话）
+  function pickBotSpeaker(excludeId = null) {
     if (!window.state) return null;
     const all = window.state.playerOrder || [];
-    const candidates = excludeMe
-      ? all.filter(p => p.id !== window.state.playerId)
-      : all;
-    if (candidates.length === 0) return null;
-    return candidates[Math.floor(Math.random() * candidates.length)];
+    const bots = all.filter(p => isBot(p) && p.id !== excludeId);
+    if (bots.length === 0) return null;
+    return bots[Math.floor(Math.random() * bots.length)];
   }
 
   function pickLine(category, nickname) {
@@ -264,12 +271,16 @@
 
   /**
    * 伪造一条本地弹幕（不走服务器，避免打扰真实聊天）
-   * speaker: { id, nickname } 可选，没传就随机
+   * speaker: { id, nickname } 必须是机器人；若非机器人会被替换为随机机器人
    */
   function showLocalDanmaku(text, speaker) {
     if (!text) return;
-    const sp = speaker || pickSpeaker(true);
-    if (!sp) return;
+    // 强制只让机器人发言
+    let sp = speaker;
+    if (!sp || !isBot(sp)) {
+      sp = pickBotSpeaker(sp?.id || null);
+    }
+    if (!sp) return; // 场上没有机器人 → 不发弹幕
 
     if (typeof window.showDanmaku === 'function') {
       window.showDanmaku({
@@ -292,9 +303,13 @@
     const prob = opts.probability ?? 0.65;
     if (Math.random() > prob) return;
 
-    // 先确定发言者（决定台词是走专属池还是通用池）
-    const sp = opts.speaker || pickSpeaker(true);
-    if (!sp) return;
+    // 只让机器人发言：若 opts.speaker 是机器人就用，否则在机器人里挑一个
+    // excludeId: 动作的当事人（不让他自己评论自己）
+    let sp = opts.speaker && isBot(opts.speaker) ? opts.speaker : null;
+    if (!sp) {
+      sp = pickBotSpeaker(opts.excludeId || null);
+    }
+    if (!sp) return; // 场上没有机器人 → 静默
 
     const line = pickLine(category, sp.nickname);
     if (!line) return;
@@ -310,74 +325,61 @@
 
   // ========== 事件接口 ==========
   // 整体触发频次控制：配合 MIN_INTERVAL=1500ms，平均每 2-3 个动作 1 条弹幕
+  // 【重要】只有机器人会主动发弹幕；真人玩家不会自动"自言自语"
   window.TrashTalk = {
     onMyBid() {
-      fire('myBid', { probability: 0.15, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
+      // 我（真人）叫数 → 某个机器人评论
+      fire('otherBid', { probability: 0.15, excludeId: window.state?.playerId });
     },
     onOtherBid(bidderId) {
-      // 让"非叫数者"中的人来吐槽
-      const all = window.state?.playerOrder || [];
-      const candidates = all.filter(p => p.id !== bidderId);
-      if (candidates.length === 0) return;
-      const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherBid', { probability: 0.22, speaker: sp });
+      // 别人叫数 → 让"非叫数者"中的机器人吐槽
+      fire('otherBid', { probability: 0.22, excludeId: bidderId });
     },
     onMeChallenged() {
-      fire('meChallenged', { probability: 0.4 });
+      // 我被劈 → 某个旁观机器人吐槽
+      fire('otherChallenged', { probability: 0.4, excludeId: window.state?.playerId });
     },
     onOtherChallenged() {
       fire('otherChallenged', { probability: 0.3 });
     },
     onMyCounter() {
-      fire('myCounter', { probability: 0.3, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
+      // 我反劈 → 旁观机器人评论
+      fire('otherChallenged', { probability: 0.3, excludeId: window.state?.playerId });
     },
     onMeWinOpen() {
-      fire('meWinOpen', { probability: 0.5, speaker: { id: window.state?.playerId, nickname: window.state?.nickname }, delay: 800 });
+      // 我开骰赢 → 输的那方机器人感叹（用 otherWin 的台词池让机器人夸赢家）
+      fire('otherWin', { probability: 0.5, excludeId: window.state?.playerId, delay: 800 });
     },
     onMeLoseOpen() {
-      fire('meLoseOpen', { probability: 0.5, speaker: { id: window.state?.playerId, nickname: window.state?.nickname }, delay: 800 });
+      // 我开骰输 → 赢的那方机器人吐槽
+      fire('otherLose', { probability: 0.5, excludeId: window.state?.playerId, delay: 800 });
     },
     onOtherWin(winnerId) {
-      const all = window.state?.playerOrder || [];
-      const candidates = all.filter(p => p.id !== winnerId);
-      if (candidates.length === 0) return;
-      const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherWin', { probability: 0.4, speaker: sp, delay: 1000 });
+      fire('otherWin', { probability: 0.4, excludeId: winnerId, delay: 1000 });
     },
     onOtherLose(loserId) {
-      const all = window.state?.playerOrder || [];
-      const candidates = all.filter(p => p.id !== loserId);
-      if (candidates.length === 0) return;
-      const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherLose', { probability: 0.55, speaker: sp, delay: 1500 });
+      fire('otherLose', { probability: 0.55, excludeId: loserId, delay: 1500 });
     },
     onLeopard(playerId) {
       // 豹子是稀有事件，保留较高概率但不强制
-      fire('leopard', { probability: 0.7, delay: 2000 });
+      fire('leopard', { probability: 0.7, excludeId: playerId, delay: 2000 });
     },
     onSingle(playerId) {
-      fire('single', { probability: 0.55, delay: 2000 });
+      fire('single', { probability: 0.55, excludeId: playerId, delay: 2000 });
     },
     onStreak(loserId) {
-      const all = window.state?.playerOrder || [];
-      const candidates = all.filter(p => p.id !== loserId);
-      if (candidates.length === 0) return;
-      const sp = candidates[Math.floor(Math.random() * candidates.length)];
       // 连败是低频事件，保留较高概率
-      fire('streak', { probability: 0.8, speaker: sp, delay: 2500 });
+      fire('streak', { probability: 0.8, excludeId: loserId, delay: 2500 });
     },
     onTimerWarn() {
-      fire('timerWarn', { probability: 0.25 });
+      fire('timerWarn', { probability: 0.25, excludeId: window.state?.playerId });
     },
     onMySurrender() {
-      fire('mySurrender', { probability: 0.5, speaker: { id: window.state?.playerId, nickname: window.state?.nickname } });
+      // 我认输 → 机器人吐槽
+      fire('otherSurrender', { probability: 0.5, excludeId: window.state?.playerId });
     },
     onOtherSurrender(surrenderId) {
-      const all = window.state?.playerOrder || [];
-      const candidates = all.filter(p => p.id !== surrenderId);
-      if (candidates.length === 0) return;
-      const sp = candidates[Math.floor(Math.random() * candidates.length)];
-      fire('otherSurrender', { probability: 0.45, speaker: sp });
+      fire('otherSurrender', { probability: 0.45, excludeId: surrenderId });
     },
   };
 })();

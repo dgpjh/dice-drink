@@ -635,8 +635,10 @@ wss.on('connection', (ws) => {
           return;
         }
 
-        // 获取已有昵称
-        const existingNames = room.playerOrder.map(pid => room.players[pid].nickname);
+        // 获取已有机器人昵称（去掉 🤖 前缀后再比对，避免重名）
+        const existingNames = room.playerOrder
+          .map(pid => room.players[pid].nickname || '')
+          .map(n => n.replace(/^🤖/, ''));
         const botId = 'bot_' + uuidv4().substring(0, 8);
         const botNickname = '🤖' + BotPlayer.getRandomName(existingNames);
         const bot = new BotPlayer(botId, botNickname);

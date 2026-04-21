@@ -2,7 +2,7 @@
 
 > 经典酒桌游戏线上版！支持 2-4 人在线对战，摇骰子、叫数、开骰，输了就得喝 🍺
 
-**当前版本：v2.5.6**
+**当前版本：v2.5.7**
 
 ---
 
@@ -174,6 +174,7 @@ pm2 save
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v2.5.7 | 2026-04-21 | **机器人体验优化**：1) 同房间机器人昵称去重（`server/index.js` 过滤 `existingNames` 时 strip 🤖 前缀，修复 `BotPlayer.getRandomName` 永远失效的 bug，避免"2个同名机器人"）；2) 弹幕发言者仅限机器人（`public/trashTalk.js` 新增 `isBot/pickBotSpeaker`，`fire()` 只在场上机器人中挑 speaker，真人玩家不再"自言自语"；无机器人时静默不发） |
 | v2.5.6 | 2026-04-20 | **弹幕频次下调**：`MIN_INTERVAL` 从 800ms → 1500ms；各事件概率整体下调至约原 50%（myBid 0.25→0.15、otherBid 0.4→0.22、meChallenged 0.7→0.4、otherLose 0.85→0.55、leopard 0.9→0.7 等）；移除 onOtherLose/onLeopard/onSingle/onStreak 的 `force:true`，让节流真正生效。整体约每 2-3 个动作 1 条弹幕，避免刷屏 |
 | v2.5.5 | 2026-04-20 | **人设微调**：新疆炒米粉改为抖音御姐美女博主人设（"姐姐我叫这么多你敢跟吗""乖，叫声姐姐""弟弟你在抖什么"），覆盖 myBid/otherBid/meWinOpen/otherLose/leopard/myCounter/mySurrender 等 9 个分类 |
 | v2.5.4 | 2026-04-20 | **人设专属弹幕**：为 12 位机器人各配 15+ 条符合人物梗的专属台词（Tom Dwan 高额桌/周润发赌神/卢本伟芜湖/陈刀仔 10 蚊/乌兹团战/布兰妮 GTO/臧书奴计算/雷军 Are you OK/童锦程兄弟们/新疆炒米粉/Tan Xuan EPT/酱酱萌萌嘎嘤嘤嘤）；`trashTalk.js` 新增 `PERSONAL_LINES` 池，`pickLine(category, nickname)` 按 60%/40% 专属/通用混排 |
