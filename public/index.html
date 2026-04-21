@@ -55,7 +55,7 @@
         </div>
         <div class="version-info">
           <button id="btn-sound-toggle" class="sound-toggle" title="音效开关">🔊</button>
-          <span>v2.5.7</span>
+          <span>v2.6.0</span>
         </div>
       </div>
     </div>
@@ -105,6 +105,27 @@
           </div>
         </div>
 
+        <div class="create-section">
+          <div class="section-label">角色技能 <span class="section-tip" title="给每人发一个技能，增加花样">?</span></div>
+          <div class="skill-mode-selector" id="skill-mode-selector">
+            <button class="sm-btn active" data-mode="none">
+              <span class="sm-name">无技能</span>
+              <span class="sm-short">纯粹玩骰</span>
+            </button>
+            <button class="sm-btn" data-mode="random">
+              <span class="sm-name">随机</span>
+              <span class="sm-short">每人抽1个</span>
+            </button>
+            <button class="sm-btn" data-mode="choose">
+              <span class="sm-name">自选</span>
+              <span class="sm-short">进房自己挑</span>
+            </button>
+          </div>
+          <div class="skill-mode-detail" id="skill-mode-detail">
+            不使用技能，原汁原味
+          </div>
+        </div>
+
         <button class="btn btn-primary" id="btn-confirm-create-room">下一步</button>
         <button class="btn btn-ghost" id="btn-cancel-create">取消</button>
       </div>
@@ -135,6 +156,18 @@
         <div class="player-list" id="waiting-player-list">
           <!-- 动态填充玩家列表 -->
         </div>
+
+        <!-- 技能选择面板（仅 skillMode='choose' 显示） -->
+        <div class="skill-choose-panel" id="skill-choose-panel" style="display:none;">
+          <div class="skill-choose-title">🎭 选一个角色技能</div>
+          <div class="skill-choose-grid" id="skill-choose-grid">
+            <!-- 动态填充 -->
+          </div>
+        </div>
+
+        <!-- 技能模式徽章（random 时显示） -->
+        <div class="skill-mode-badge" id="skill-mode-badge" style="display:none;"></div>
+
         <button class="btn btn-warning btn-add-bot" id="btn-add-bot">
           <span class="btn-icon">🤖</span>
           添加机器人
@@ -188,6 +221,10 @@
             <span class="player-score" id="game-my-score">🍺 欠杯：0</span>
           </div>
           <div class="dice-row my-dice" id="my-dice">
+            <!-- 动态填充 -->
+          </div>
+          <!-- 技能栏（根据 skillMode 显示） -->
+          <div class="skill-bar" id="skill-bar" style="display:none;">
             <!-- 动态填充 -->
           </div>
         </div>
@@ -352,6 +389,28 @@
           </ul>
         </div>
         <button class="btn btn-primary" id="btn-back-home">返回首页</button>
+      </div>
+    </div>
+
+    <!-- 技能 - 选目标玩家弹窗 -->
+    <div id="modal-skill-target" class="modal">
+      <div class="modal-content">
+        <h2 id="skill-target-title">👁️ 选一位玩家</h2>
+        <div class="skill-target-list" id="skill-target-list">
+          <!-- 动态填充 -->
+        </div>
+        <button class="btn btn-ghost" id="btn-cancel-skill-target">取消</button>
+      </div>
+    </div>
+
+    <!-- 技能 - 选要换的骰子弹窗 -->
+    <div id="modal-skill-dice" class="modal">
+      <div class="modal-content">
+        <h2>🎲 选一颗要换的骰子</h2>
+        <div class="skill-dice-list" id="skill-dice-list">
+          <!-- 动态填充 -->
+        </div>
+        <button class="btn btn-ghost" id="btn-cancel-skill-dice">取消</button>
       </div>
     </div>
 

@@ -54,16 +54,90 @@ class BotPlayer {
    *   - playerCount: number 玩家人数
    *   - phase: 'bidding' | 'challenging'
    *   - challenge: object | null 劈骰信息
+   *   - mySkill: { id, used, type } | null 我的技能
+   *   - allPlayers: [{ id, isBot }] 全场玩家（用于 peek 选目标）
+   *   - myPlayerId: string 我的 id（用于 peek 排除自己）
    * @returns {{ action: string, data?: object }}
    */
   decide(context) {
-    const { phase, challenge } = context;
+    const { phase } = context;
 
     if (phase === 'challenging') {
       return this.decideChallenge(context);
     }
 
+    // 叫数阶段：先看要不要先用主动技能
+    const skillAction = this.maybeUseSkill(context);
+    if (skillAction) return skillAction;
+
     return this.decideBidding(context);
+  }
+
+  /**
+   * 叫数阶段：考虑是否先用主动技能（在自己回合时）
+   * 返回一个 use_skill action，或 null 表示不用
+   */
+  maybeUseSkill(context) {
+    const { mySkill, myDice, lastBid, allPlayers, myPlayerId } = context;
+    if (!mySkill || mySkill.used || mySkill.type !== 'active') return null;
+
+    const id = mySkill.id;
+
+    // peek：本局自己第一次操作时，30% 概率偷看一个真人对手（优先真人，没真人就挑机器人）
+    if (id === 'peek') {
+      if (Math.random() < 0.35) {
+        const candidates = (allPlayers || []).filter(p => p.id !== myPlayerId);
+        if (candidates.length === 0) return null;
+        // 优先挑真人
+        const humans = candidates.filter(p => !p.isBot);
+        const pool = humans.length ? humans : candidates;
+        const target = pool[Math.floor(Math.random() * pool.length)];
+        return { action: 'use_skill', data: { skillId: 'peek', targetId: target.id } };
+      }
+      return null;
+    }
+
+    // reroll / bigReroll：仅在本局第一次叫数前使用（lastBid 为 null）
+    if (id === 'reroll' || id === 'bigReroll') {
+      if (lastBid) return null;
+      // 评估自己的手牌好坏
+      const counts = {};
+      for (const d of myDice) counts[d] = (counts[d] || 0) + 1;
+      const maxSame = Math.max(...Object.values(counts));
+      const uniq = Object.keys(counts).length;
+      // 单骰或散牌（5种全不同 / 最多2同）更可能换
+      if (id === 'reroll') {
+        // 找到最稀有的单颗骰子
+        if (uniq >= 4 && Math.random() < 0.6) {
+          // 找出现次数最少的骰子
+          let worstIdx = 0, worstVal = myDice[0], worstCount = counts[myDice[0]];
+          for (let i = 0; i < myDice.length; i++) {
+            if (counts[myDice[i]] < worstCount) {
+              worstCount = counts[myDice[i]];
+              worstVal = myDice[i];
+              worstIdx = i;
+            }
+          }
+          return { action: 'use_skill', data: { skillId: 'reroll', diceIndex: worstIdx } };
+        }
+      } else {
+        // bigReroll：只在明显劣势手牌（uniq=5 单骰 or maxSame<=1）时用
+        if (uniq === 5 && Math.random() < 0.7) {
+          return { action: 'use_skill', data: { skillId: 'bigReroll' } };
+        }
+      }
+      return null;
+    }
+
+    // silencer：在自己要叫数时，40% 概率提前激活
+    if (id === 'silencer') {
+      if (Math.random() < 0.4) {
+        return { action: 'use_skill', data: { skillId: 'silencer' } };
+      }
+      return null;
+    }
+
+    return null;
   }
 
   /**

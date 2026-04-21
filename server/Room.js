@@ -4,6 +4,7 @@
  */
 const GameEngine = require('./gameEngine');
 const { createRuleSet } = require('./rules');
+const { SKILLS, createSkillState, rollDiceWithSkill, randomSkillId } = require('./skills');
 
 // 游戏阶段
 const PHASE = {
@@ -16,7 +17,7 @@ const PHASE = {
 };
 
 class Room {
-  constructor(roomCode, hostPlayerId, maxPlayers = 2, ruleSet = null) {
+  constructor(roomCode, hostPlayerId, maxPlayers = 2, ruleSet = null, skillMode = 'none') {
     this.roomCode = roomCode;
     this.createdAt = Date.now();
     this.phase = PHASE.WAITING;
@@ -24,6 +25,9 @@ class Room {
 
     // 规则集
     this.ruleSet = ruleSet || createRuleSet();
+
+    // 技能模式：'none'（无技能）/ 'random'（随机发）/ 'choose'（自选）
+    this.skillMode = skillMode || 'none';
 
     // 玩家
     this.players = {};  // { playerId: { id, nickname, ws, dice, connected, disconnectedAt } }
@@ -62,9 +66,22 @@ class Room {
     }
   }
 
-  addPlayer(playerId, nickname, ws) {
+  addPlayer(playerId, nickname, ws, opts = {}) {
     if (this.playerOrder.length >= this.maxPlayers) {
       return { success: false, reason: '房间已满' };
+    }
+
+    // 分配技能（根据 skillMode）
+    let skillId = null;
+    if (this.skillMode === 'random') {
+      skillId = randomSkillId();
+    } else if (this.skillMode === 'choose') {
+      // 先给个占位，真人需要后续调用 chooseSkill 修改；机器人进房时已通过 opts.presetSkill 指定
+      skillId = opts.presetSkill || null;
+    }
+    // 机器人可以强制用人设绑定的技能（opts.presetSkill）
+    if (opts.presetSkill && this.skillMode !== 'none') {
+      skillId = opts.presetSkill;
     }
 
     this.players[playerId] = {
@@ -73,7 +90,9 @@ class Room {
       ws,
       dice: [],
       connected: true,
-      disconnectedAt: null
+      disconnectedAt: null,
+      skill: this.skillMode === 'none' ? null : createSkillState(skillId),
+      isBot: !!opts.isBot
     };
     this.playerOrder.push(playerId);
     this.stats[playerId] = { wins: 0, losses: 0, totalScore: 0, streak: 0, singleStreak: 0 };
@@ -86,6 +105,27 @@ class Room {
     // 通知所有玩家信息更新
     this.broadcastPlayerInfo();
 
+    return { success: true };
+  }
+
+  /**
+   * 玩家在 waiting 阶段选择/更换技能（仅 skillMode='choose' 时）
+   */
+  chooseSkill(playerId, skillId) {
+    if (this.skillMode !== 'choose') {
+      return { success: false, reason: '当前房间不支持自选技能' };
+    }
+    if (this.phase !== PHASE.WAITING) {
+      return { success: false, reason: '游戏已开始，无法更换技能' };
+    }
+    if (!SKILLS[skillId]) {
+      return { success: false, reason: '未知技能' };
+    }
+    const player = this.players[playerId];
+    if (!player) return { success: false, reason: '玩家不存在' };
+
+    player.skill = createSkillState(skillId);
+    this.broadcastPlayerInfo();
     return { success: true };
   }
 
@@ -126,24 +166,47 @@ class Room {
       const others = this.getOtherPlayers(pid).map(opId => ({
         id: opId,
         nickname: this.players[opId].nickname,
-        connected: this.players[opId].connected
+        connected: this.players[opId].connected,
+        // 其他玩家的技能对所有人公开（信息透明）
+        skill: this.publicSkill(this.players[opId].skill)
       }));
 
       this.sendTo(pid, 'player_info', {
-        you: { id: pid, nickname: player.nickname },
+        you: {
+          id: pid,
+          nickname: player.nickname,
+          skill: this.publicSkill(player.skill)  // 自己的技能
+        },
         // 兼容旧版：2人模式仍提供 opponent 字段
         opponent: others.length === 1 ? { id: others[0].id, nickname: others[0].nickname } : null,
         others,
         playerOrder: this.playerOrder.map(id => ({
           id,
           nickname: this.players[id].nickname,
-          connected: this.players[id].connected
+          connected: this.players[id].connected,
+          skill: this.publicSkill(this.players[id].skill)
         })),
         maxPlayers: this.maxPlayers,
         ruleSet: this.ruleSet,
+        skillMode: this.skillMode,
         stats: this.stats
       });
     }
+  }
+
+  /**
+   * 技能对外展示（不暴露 pendingSilencer 这种内部状态）
+   */
+  publicSkill(skill) {
+    if (!skill) return null;
+    return {
+      id: skill.id,
+      name: skill.name,
+      icon: skill.icon,
+      type: skill.type,
+      desc: skill.desc,
+      used: !!skill.used
+    };
   }
 
   // =============== 游戏流程 ===============
@@ -153,14 +216,25 @@ class Room {
 
     this.phase = PHASE.ROLLING;
 
-    // 摇骰（含单骰重摇逻辑）
+    // 每一局开始重置主动技能使用次数 + 封口激活状态
+    for (const pid of this.playerOrder) {
+      const p = this.players[pid];
+      if (p && p.skill && p.skill.type === 'active') {
+        p.skill.used = false;
+        p.skill.pendingSilencer = false;
+      }
+    }
+
+    // 摇骰（含单骰重摇逻辑 + 好运姐被动偏置）
     const dice = {};
     const rerollEvents = [];        // 广播给客户端做提示
     let singleLoser = null;          // 连续单骰判负的玩家
     const maxStreak = this.ruleSet.singleRerollMaxStreak || 3;
 
     for (const pid of this.playerOrder) {
-      let rolled = GameEngine.rollDice(5);
+      const p = this.players[pid];
+      const isLucky = !!(p.skill && p.skill.id === 'lucky');
+      let rolled = rollDiceWithSkill(5, isLucky);
 
       if (this.ruleSet.singleBehavior === 'reroll') {
         // 单骰重摇：每次摇到单骰累加 singleStreak，到上限判负；本局最终非单骰则重置
@@ -176,7 +250,7 @@ class Room {
             singleLoser = pid;
             break;
           }
-          rolled = GameEngine.rollDice(5);
+          rolled = rollDiceWithSkill(5, isLucky);
         }
         // 本局最终未单骰 → 重置连续计数
         if (!singleLoser && GameEngine.detectPattern(rolled).type !== 'single') {
@@ -229,15 +303,18 @@ class Room {
     for (const pid of this.playerOrder) {
       this.sendTo(pid, 'game_start', {
         yourDice: dice[pid],
+        yourSkill: this.publicSkill(this.players[pid].skill),
         firstPlayer,
         currentTurn: firstPlayer,
         phase: this.phase,
         stats: this.stats,
         ruleSet: this.ruleSet,
+        skillMode: this.skillMode,
         rerollEvents,
         playerOrder: this.playerOrder.map(id => ({
           id,
-          nickname: this.players[id].nickname
+          nickname: this.players[id].nickname,
+          skill: this.publicSkill(this.players[id].skill)
         })),
         totalDice: this.playerOrder.length * 5,
         minBidRules: GameEngine.getMinBidByPlayerCount(this.playerOrder.length)
@@ -245,6 +322,183 @@ class Room {
     }
 
     this.startTurnTimeout();
+  }
+
+  // =============== 技能使用 ===============
+
+  /**
+   * 玩家使用主动技能
+   * @param {string} playerId
+   * @param {string} skillId
+   * @param {object} payload - { targetId?, diceIndex? }
+   */
+  handleUseSkill(playerId, skillId, payload = {}) {
+    const player = this.players[playerId];
+    if (!player) return { success: false, reason: '玩家不存在' };
+    if (!player.skill || player.skill.id !== skillId) {
+      return { success: false, reason: '你没有这个技能' };
+    }
+    if (player.skill.used) {
+      return { success: false, reason: '本局技能已使用' };
+    }
+    const def = SKILLS[skillId];
+    if (!def || def.type !== 'active') {
+      return { success: false, reason: '该技能不是主动技能' };
+    }
+    if (this.phase !== PHASE.BIDDING) {
+      return { success: false, reason: '当前阶段不能使用技能' };
+    }
+
+    // 时机校验：多数技能要求在自己回合
+    if (def.timing === 'myTurn' || def.timing === 'myTurnBeforeFirstBid' || def.timing === 'myTurnBeforeBid') {
+      if (this.currentGame.currentTurn !== playerId) {
+        return { success: false, reason: '请在自己回合使用技能' };
+      }
+    }
+    if (def.timing === 'myTurnBeforeFirstBid') {
+      // 本局还没有任何叫数（lastBid 为空）
+      if (this.currentGame.lastBid) {
+        return { success: false, reason: '本局已有人叫数，此技能只能在第一次叫数前使用' };
+      }
+    }
+
+    // 分派到具体技能处理
+    let result;
+    switch (skillId) {
+      case 'peek':
+        result = this._skillPeek(playerId, payload);
+        break;
+      case 'reroll':
+        result = this._skillReroll(playerId, payload);
+        break;
+      case 'bigReroll':
+        result = this._skillBigReroll(playerId);
+        break;
+      case 'silencer':
+        result = this._skillSilencer(playerId);
+        break;
+      default:
+        return { success: false, reason: '未知技能' };
+    }
+
+    if (result && result.success) {
+      player.skill.used = true;
+      // 广播"某某用了某技能"（不含私密数据）
+      this.broadcast('skill_used', {
+        playerId,
+        nickname: player.nickname,
+        skillId,
+        skillName: player.skill.name,
+        skillIcon: player.skill.icon,
+        publicData: result.publicData || null
+      });
+    }
+    return result;
+  }
+
+  /**
+   * 透视：偷看指定玩家 1 颗骰子
+   */
+  _skillPeek(playerId, payload) {
+    const { targetId } = payload;
+    if (!targetId || !this.players[targetId]) {
+      return { success: false, reason: '请选择合法的目标玩家' };
+    }
+    if (targetId === playerId) {
+      return { success: false, reason: '不能偷看自己' };
+    }
+    const targetDice = this.players[targetId].dice || [];
+    if (targetDice.length === 0) {
+      return { success: false, reason: '目标玩家还未摇骰' };
+    }
+    // 随机偷看 1 颗
+    const idx = Math.floor(Math.random() * targetDice.length);
+    const peekedValue = targetDice[idx];
+
+    // 只推给使用者
+    this.sendTo(playerId, 'skill_peek_result', {
+      targetId,
+      targetNickname: this.players[targetId].nickname,
+      diceIndex: idx,
+      diceValue: peekedValue
+    });
+    // 提示被看者（不告诉是谁看的）
+    this.sendTo(targetId, 'skill_peeked', {
+      message: `💀 有人偷看了你的一颗骰子`
+    });
+
+    return {
+      success: true,
+      publicData: {
+        targetId,
+        targetNickname: this.players[targetId].nickname
+      }
+    };
+  }
+
+  /**
+   * 换骰：换自己 1 颗骰子
+   */
+  _skillReroll(playerId, payload) {
+    const { diceIndex } = payload;
+    const player = this.players[playerId];
+    const dice = player.dice || [];
+    if (typeof diceIndex !== 'number' || diceIndex < 0 || diceIndex >= dice.length) {
+      return { success: false, reason: '请选择要换的骰子' };
+    }
+    // 重摇 1 颗（不受好运姐影响，保持简单）
+    const newVal = 1 + Math.floor(Math.random() * 6);
+    const oldVal = dice[diceIndex];
+    dice[diceIndex] = newVal;
+    dice.sort((a, b) => a - b);
+    player.dice = dice;
+
+    // 推送新骰子给本人
+    this.sendTo(playerId, 'skill_reroll_result', {
+      newDice: dice,
+      oldValue: oldVal,
+      newValue: newVal
+    });
+
+    return {
+      success: true,
+      publicData: { changedCount: 1 }
+    };
+  }
+
+  /**
+   * 大换骰：全部 5 颗重摇
+   */
+  _skillBigReroll(playerId) {
+    const player = this.players[playerId];
+    const isLucky = !!(player.skill && player.skill.id === 'lucky'); // 不可能（大换骰 != 好运姐）
+    const newDice = rollDiceWithSkill(5, isLucky);
+    player.dice = newDice;
+
+    this.sendTo(playerId, 'skill_reroll_result', {
+      newDice,
+      bigReroll: true
+    });
+
+    return {
+      success: true,
+      publicData: { changedCount: 5 }
+    };
+  }
+
+  /**
+   * 封口：激活后下一次叫数生效，下家只能"劈"或"认输"
+   */
+  _skillSilencer(playerId) {
+    const player = this.players[playerId];
+    if (!player.skill) return { success: false, reason: '技能不存在' };
+    // 标记：下次 handleBid 时，给 currentGame 设置 silencerActive
+    player.skill.pendingSilencer = true;
+
+    return {
+      success: true,
+      publicData: { message: '封口已激活，你下次叫数后下家只能劈或认输' }
+    };
   }
 
   /**
@@ -312,6 +566,10 @@ class Room {
     if (this.currentGame.currentTurn !== playerId) {
       return { success: false, reason: '不是你的回合' };
     }
+    // 封口：如果你是被封口的下家，不能叫数
+    if (this.currentGame.silencerTarget === playerId) {
+      return { success: false, reason: '🔒 你被封口了！只能劈或认输' };
+    }
 
     // 飞斋规则下：叫1默认斋；无飞斋规则下：强制 mode='guo1'
     if (this.ruleSet.hasFlyZhai === false) {
@@ -353,6 +611,19 @@ class Room {
     const nextPlayer = this.getNextPlayer(playerId);
     this.currentGame.currentTurn = nextPlayer;
 
+    // 技能：封口 —— 如果本次叫数者激活了封口，下家只能 challenge/surrender
+    const bidder = this.players[playerId];
+    let silencerOn = false;
+    if (bidder && bidder.skill && bidder.skill.pendingSilencer) {
+      silencerOn = true;
+      bidder.skill.pendingSilencer = false; // 消耗激活
+      this.currentGame.silencerBy = playerId;       // 谁锁的
+      this.currentGame.silencerTarget = nextPlayer; // 锁谁
+    } else {
+      this.currentGame.silencerBy = null;
+      this.currentGame.silencerTarget = null;
+    }
+
     // 广播叫数
     this.broadcast('bid_made', {
       playerId,
@@ -361,7 +632,10 @@ class Room {
       bids: this.currentGame.bids,
       currentTurn: nextPlayer,
       onesCalled: this.currentGame.onesCalled,
-      phase: this.phase
+      phase: this.phase,
+      silencerOn,
+      silencerBy: silencerOn ? playerId : null,
+      silencerTarget: silencerOn ? nextPlayer : null
     });
 
     // 重置回合计时
@@ -494,6 +768,13 @@ class Room {
     }
     if (this.currentGame.challenge.currentTurn !== playerId) {
       return { success: false, reason: '不是你的回合' };
+    }
+
+    // 斧头帮被动：如果发起劈骰的玩家是斧头帮，被劈方不能认输
+    const axeCheck = this.currentGame.challenge;
+    const challenger = this.players[axeCheck.initiator];
+    if (challenger && challenger.skill && challenger.skill.id === 'axeman') {
+      return { success: false, reason: '🪓 对方是斧头帮，不能认输！' };
     }
 
     this.clearTurnTimeout();
@@ -892,16 +1173,19 @@ class Room {
       phase: this.phase,
       maxPlayers: this.maxPlayers,
       ruleSet: this.ruleSet,
+      skillMode: this.skillMode,
       you: {
         id: playerId,
         nickname: this.players[playerId].nickname,
-        dice: this.players[playerId].dice
+        dice: this.players[playerId].dice,
+        skill: this.publicSkill(this.players[playerId].skill)
       },
       stats: this.stats,
       playerOrder: this.playerOrder.map(id => ({
         id,
         nickname: this.players[id].nickname,
-        connected: this.players[id].connected
+        connected: this.players[id].connected,
+        skill: this.publicSkill(this.players[id].skill)
       }))
     };
 
@@ -974,10 +1258,12 @@ class Room {
       phase: this.phase,
       maxPlayers: this.maxPlayers,
       ruleSet: this.ruleSet,
+      skillMode: this.skillMode,
       players: this.playerOrder.map(pid => ({
         id: pid,
         nickname: this.players[pid].nickname,
-        connected: this.players[pid].connected
+        connected: this.players[pid].connected,
+        skill: this.publicSkill(this.players[pid].skill)
       })),
       stats: this.stats,
       createdAt: this.createdAt

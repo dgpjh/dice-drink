@@ -10,6 +10,7 @@ const { v4: uuidv4 } = require('uuid');
 const Room = require('./Room');
 const BotPlayer = require('./BotPlayer');
 const { createRuleSet, listPresets, listSingleBehaviors } = require('./rules');
+const { listSkills, getSkillByNickname } = require('./skills');
 
 const app = express();
 const server = http.createServer(app);
@@ -34,7 +35,8 @@ app.get('/api/rules', (req, res) => {
   res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify({
     presets: listPresets(),
-    singleBehaviors: listSingleBehaviors()
+    singleBehaviors: listSingleBehaviors(),
+    skills: listSkills()
   }));
 });
 
@@ -249,7 +251,14 @@ function executeBotAction(roomCode, botPlayerId) {
     phase: room.phase,
     challenge: room.currentGame?.challenge || null,
     ruleSet: room.ruleSet,
-    onesCalled: !!(room.currentGame && room.currentGame.onesCalled)
+    onesCalled: !!(room.currentGame && room.currentGame.onesCalled),
+    mySkill: player.skill || null,
+    myPlayerId: botPlayerId,
+    allPlayers: room.playerOrder.map(pid => ({
+      id: pid,
+      nickname: room.players[pid].nickname,
+      isBot: !!room.players[pid].isBot
+    }))
   };
 
   const decision = bot.decide(context);
@@ -257,6 +266,15 @@ function executeBotAction(roomCode, botPlayerId) {
 
   let result;
   switch (decision.action) {
+    case 'use_skill':
+      result = room.handleUseSkill(botPlayerId, decision.data.skillId, decision.data);
+      if (!result.success) {
+        console.log(`[Bot] ${bot.nickname} 技能使用失败(${result.reason})，继续正常决策`);
+      }
+      // 技能用完继续思考 —— 再调一次（短延迟）
+      setTimeout(() => executeBotAction(roomCode, botPlayerId), 600);
+      return;
+
     case 'bid':
       result = room.handleBid(botPlayerId, {
         quantity: decision.data.quantity,
@@ -389,9 +407,10 @@ wss.on('connection', (ws) => {
         const maxPlayers = Math.min(Math.max(parseInt(data.maxPlayers) || 2, 2), 4);
         const presetId = data.preset || 'classic';
         const singleBehavior = data.singleBehavior || 'zero';
+        const skillMode = ['none', 'random', 'choose'].includes(data.skillMode) ? data.skillMode : 'none';
         const ruleSet = createRuleSet(presetId, singleBehavior);
         const roomCode = generateRoomCode();
-        const room = new Room(roomCode, playerId, maxPlayers, ruleSet);
+        const room = new Room(roomCode, playerId, maxPlayers, ruleSet, skillMode);
         rooms[roomCode] = room;
         room.addPlayer(playerId, nickname, ws);
         playerRooms[playerId] = roomCode;
@@ -405,10 +424,11 @@ wss.on('connection', (ws) => {
             nickname,
             maxPlayers,
             ruleSet,
+            skillMode,
             roomInfo: room.getRoomInfo()
           }
         }));
-        console.log(`[Room] ${nickname} 创建房间 ${roomCode}（${maxPlayers}人, ${ruleSet.presetName}, 单骰:${ruleSet.singleBehaviorName}）`);
+        console.log(`[Room] ${nickname} 创建房间 ${roomCode}（${maxPlayers}人, ${ruleSet.presetName}, 单骰:${ruleSet.singleBehaviorName}, 技能模式:${skillMode}）`);
         break;
       }
 
@@ -568,6 +588,29 @@ wss.on('connection', (ws) => {
         break;
       }
 
+      case 'use_skill': {
+        const room = rooms[currentRoomCode];
+        if (!room) return;
+        const result = room.handleUseSkill(playerId, data.skillId, {
+          targetId: data.targetId,
+          diceIndex: data.diceIndex
+        });
+        if (!result.success) {
+          ws.send(JSON.stringify({ type: 'error', data: { message: result.reason } }));
+        }
+        break;
+      }
+
+      case 'choose_skill': {
+        const room = rooms[currentRoomCode];
+        if (!room) return;
+        const result = room.chooseSkill(playerId, data.skillId);
+        if (!result.success) {
+          ws.send(JSON.stringify({ type: 'error', data: { message: result.reason } }));
+        }
+        break;
+      }
+
       case 'leave_room': {
         const room = rooms[currentRoomCode];
         if (!room) return;
@@ -640,9 +683,13 @@ wss.on('connection', (ws) => {
           .map(pid => room.players[pid].nickname || '')
           .map(n => n.replace(/^🤖/, ''));
         const botId = 'bot_' + uuidv4().substring(0, 8);
-        const botNickname = '🤖' + BotPlayer.getRandomName(existingNames);
+        const botNameRaw = BotPlayer.getRandomName(existingNames);
+        const botNickname = '🤖' + botNameRaw;
         const bot = new BotPlayer(botId, botNickname);
         bots[botId] = bot;
+
+        // 机器人的技能 = 人设绑定（NICKNAME_TO_SKILL）；仅在 skillMode !== 'none' 时生效
+        const presetSkill = room.skillMode === 'none' ? null : getSkillByNickname(botNameRaw);
 
         // 用一个假的 ws（Bot 不需要真正的 WebSocket）
         const fakeWs = {
@@ -656,7 +703,10 @@ wss.on('connection', (ws) => {
           readyState: 1 // WebSocket.OPEN
         };
 
-        const result = room.addPlayer(botId, botNickname, fakeWs);
+        const result = room.addPlayer(botId, botNickname, fakeWs, {
+          isBot: true,
+          presetSkill
+        });
         if (!result.success) {
           ws.send(JSON.stringify({ type: 'error', data: { message: result.reason } }));
           delete bots[botId];
@@ -664,7 +714,7 @@ wss.on('connection', (ws) => {
         }
 
         playerRooms[botId] = currentRoomCode;
-        console.log(`[Bot] ${botNickname} 加入房间 ${currentRoomCode}`);
+        console.log(`[Bot] ${botNickname} 加入房间 ${currentRoomCode}${presetSkill ? `（技能: ${presetSkill}）` : ''}`);
 
         // 如果房间满了，2秒后自动开始
         if (room.playerOrder.length === room.maxPlayers) {

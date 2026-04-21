@@ -46,6 +46,15 @@ const state = {
   selectedValue: 2,
   selectedMode: 'fly',
 
+  // 技能系统
+  skillMode: 'none',           // 当前房间的技能模式 none/random/choose
+  selectedSkillMode: 'none',   // 创房时选中的技能模式
+  mySkill: null,               // 我的技能 { id, name, icon, type, desc, used }
+  silencerTarget: null,        // 被封口的目标玩家id（下家不能叫数）
+  silencerBy: null,            // 封口发起者
+  peekedMap: {},               // 透视过的骰子缓存 { targetId: { idx, value, nickname } }
+  skillsCatalog: [],           // 所有技能定义（给"自选"模式用）
+
   // 计时器
   timerInterval: null,
   timerRemaining: 30,
@@ -175,6 +184,8 @@ function handleMessage(msg) {
       state.nickname = data.nickname;
       state.maxPlayers = data.maxPlayers || 2;
       if (data.ruleSet) state.ruleSet = data.ruleSet;
+      if (data.skillMode) state.skillMode = data.skillMode;
+      if (data.roomInfo?.skillMode) state.skillMode = data.roomInfo.skillMode;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -185,6 +196,7 @@ function handleMessage(msg) {
       state.nickname = data.nickname;
       state.maxPlayers = data.roomInfo?.maxPlayers || 2;
       if (data.roomInfo?.ruleSet) state.ruleSet = data.roomInfo.ruleSet;
+      if (data.roomInfo?.skillMode) state.skillMode = data.roomInfo.skillMode;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -193,6 +205,8 @@ function handleMessage(msg) {
       state.opponent = data.opponent;
       state.stats = data.stats;
       if (data.ruleSet) state.ruleSet = data.ruleSet;
+      if (data.skillMode) state.skillMode = data.skillMode;
+      if (data.you && data.you.skill !== undefined) state.mySkill = data.you.skill;
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
         state.maxPlayers = data.maxPlayers || state.maxPlayers;
@@ -200,6 +214,7 @@ function handleMessage(msg) {
         updateMinBidRules(data.playerOrder.length);
       }
       updateWaitingPlayerList();
+      updateSkillChoosePanel();
       break;
 
     case 'game_start':
@@ -212,7 +227,12 @@ function handleMessage(msg) {
       state.phase = 'game';
       state.stats = data.stats;
       state.onesCalled = false;
+      state.silencerTarget = null;
+      state.silencerBy = null;
+      state.peekedMap = {};
       if (data.ruleSet) state.ruleSet = data.ruleSet;
+      if (data.skillMode) state.skillMode = data.skillMode;
+      if (data.yourSkill !== undefined) state.mySkill = data.yourSkill;
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
       }
@@ -232,8 +252,20 @@ function handleMessage(msg) {
       state.currentTurn = data.currentTurn;
       state.isMyTurn = data.currentTurn === state.playerId;
       if (typeof data.onesCalled === 'boolean') state.onesCalled = data.onesCalled;
+      // 封口状态
+      if (data.silencerOn) {
+        state.silencerBy = data.silencerBy;
+        state.silencerTarget = data.silencerTarget;
+        const byName = getPlayerName(data.silencerBy);
+        const tgtName = data.silencerTarget === state.playerId ? '你' : getPlayerName(data.silencerTarget);
+        showToast(`🔒 ${byName} 激活封口！${tgtName} 只能劈或认输`, 'success');
+      } else {
+        state.silencerBy = null;
+        state.silencerTarget = null;
+      }
       updateBidHistory(data);
       updateActionArea();
+      updateSkillBar();
       resetTimer();
       if (window.Sound) window.Sound.bid();
       // 损友吐槽
@@ -397,6 +429,22 @@ function handleMessage(msg) {
     case 'chat_message':
       showDanmaku(data);
       break;
+
+    case 'skill_used':
+      handleSkillUsedBroadcast(data);
+      break;
+
+    case 'skill_peek_result':
+      handleSkillPeekResult(data);
+      break;
+
+    case 'skill_reroll_result':
+      handleSkillRerollResult(data);
+      break;
+
+    case 'skill_peeked':
+      showToast(data.message || '💀 有人偷看了你的骰子', 'error');
+      break;
   }
 }
 
@@ -473,6 +521,7 @@ document.getElementById('btn-create-room').addEventListener('click', async () =>
   await ensureRulesCatalog();
   renderPresetSelector();
   renderSingleBehaviorSelector();
+  renderSkillModeSelector();
 
   showModal('modal-create');
 });
@@ -483,6 +532,9 @@ async function ensureRulesCatalog() {
   try {
     const resp = await fetch('/api/rules');
     state.rulesCatalog = await resp.json();
+    if (state.rulesCatalog.skills) {
+      state.skillsCatalog = state.rulesCatalog.skills;
+    }
   } catch (e) {
     console.error('[Rules] 拉取失败，使用兜底', e);
     state.rulesCatalog = {
@@ -559,6 +611,34 @@ function renderSingleBehaviorSelector() {
   }
 }
 
+// =============== 技能模式选择器（创房） ===============
+function renderSkillModeSelector() {
+  const container = document.getElementById('skill-mode-selector');
+  const detail = document.getElementById('skill-mode-detail');
+  if (!container) return;
+
+  const descMap = {
+    none: '不使用技能，原汁原味',
+    random: '开局每人随机发 1 个技能，命由天定',
+    choose: '进房后每人自己挑 1 个技能，看谁最骚'
+  };
+
+  // 初始化 UI 状态
+  container.querySelectorAll('.sm-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === state.selectedSkillMode);
+  });
+  if (detail) detail.textContent = descMap[state.selectedSkillMode] || '';
+
+  container.onclick = (e) => {
+    const btn = e.target.closest('.sm-btn');
+    if (!btn) return;
+    state.selectedSkillMode = btn.dataset.mode;
+    container.querySelectorAll('.sm-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    if (detail) detail.textContent = descMap[state.selectedSkillMode] || '';
+  };
+}
+
 // 人数选择器
 document.getElementById('player-count-selector').addEventListener('click', (e) => {
   const btn = e.target.closest('.count-btn');
@@ -632,7 +712,8 @@ function handleCreateRoom() {
     playerId: state.playerId,
     maxPlayers: state.maxPlayers,
     preset: state.selectedPreset,
-    singleBehavior: state.selectedSingleBehavior
+    singleBehavior: state.selectedSingleBehavior,
+    skillMode: state.selectedSkillMode || 'none'
   };
 
   console.log('[创建房间]', payload);
@@ -716,9 +797,19 @@ function updateWaitingPlayerList() {
       const isMe = p.id === state.playerId;
       const isBot = (p.id && p.id.startsWith('bot_')) || (p.nickname && p.nickname.startsWith('🤖'));
       div.className = `player-item ${isMe ? 'you' : (isBot ? 'bot' : 'other')}`;
+      // 技能标签（仅在 skillMode != 'none' 时展示）
+      let skillTag = '';
+      if (state.skillMode && state.skillMode !== 'none') {
+        if (p.skill) {
+          skillTag = `<span class="player-skill-tag" title="${p.skill.desc || ''}">${p.skill.icon || '🎭'} ${p.skill.name}</span>`;
+        } else {
+          skillTag = `<span class="player-skill-tag empty">未选</span>`;
+        }
+      }
       div.innerHTML = `
         <span class="player-status">${isBot ? '🤖' : '✅'}</span>
         <span class="player-name">${p.nickname}${isMe ? '（你）' : ''}</span>
+        ${skillTag}
       `;
     } else {
       div.className = 'player-item empty';
@@ -731,6 +822,65 @@ function updateWaitingPlayerList() {
   }
 
   updateAddBotButton();
+  updateSkillModeBadge();
+}
+
+// 显示"随机/自选"技能模式徽章
+function updateSkillModeBadge() {
+  const badge = document.getElementById('skill-mode-badge');
+  if (!badge) return;
+  if (!state.skillMode || state.skillMode === 'none') {
+    badge.style.display = 'none';
+    return;
+  }
+  const textMap = {
+    random: '🎭 技能模式：随机发牌（开局揭晓）',
+    choose: '🎭 技能模式：自选技能'
+  };
+  badge.textContent = textMap[state.skillMode] || '';
+  badge.style.display = 'block';
+}
+
+// waiting 页面的技能自选面板
+function updateSkillChoosePanel() {
+  const panel = document.getElementById('skill-choose-panel');
+  const grid = document.getElementById('skill-choose-grid');
+  if (!panel || !grid) return;
+
+  if (state.skillMode !== 'choose') {
+    panel.style.display = 'none';
+    return;
+  }
+
+  const skills = state.skillsCatalog || [];
+  if (!skills.length) {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = 'block';
+  const currentId = state.mySkill && state.mySkill.id;
+
+  grid.innerHTML = skills.map(s => `
+    <button class="skill-choose-card ${s.id === currentId ? 'active' : ''}" data-skill="${s.id}">
+      <div class="skill-card-head">
+        <span class="skill-card-icon">${s.icon}</span>
+        <span class="skill-card-name">${s.name}</span>
+        <span class="skill-card-type ${s.type}">${s.type === 'active' ? '主动' : '被动'}</span>
+      </div>
+      <div class="skill-card-desc">${s.desc}</div>
+    </button>
+  `).join('');
+
+  grid.onclick = (e) => {
+    const btn = e.target.closest('.skill-choose-card');
+    if (!btn) return;
+    const skillId = btn.dataset.skill;
+    sendMsg('choose_skill', { skillId });
+    // 乐观更新（服务端会通过 player_info 覆盖）
+    grid.querySelectorAll('.skill-choose-card').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  };
 }
 
 function startRoomCountdown() {
@@ -834,6 +984,9 @@ function showGamePage(data) {
     state.selectedMode = 'fly';
   }
   updateSelectors();
+
+  // 刷新技能栏
+  updateSkillBar();
 }
 
 /**
@@ -1024,6 +1177,23 @@ function updateActionArea() {
     const hasLastBid = state.bids.length > 0;
     document.getElementById('btn-open').disabled = !hasLastBid;
     document.getElementById('btn-challenge').disabled = !hasLastBid;
+
+    // 被封口：禁用叫骰按钮（只能开或劈）
+    const silenced = state.silencerTarget === state.playerId;
+    document.getElementById('btn-bid').disabled = silenced || document.getElementById('btn-bid').disabled;
+    if (silenced) {
+      const hint = document.getElementById('silencer-hint');
+      if (!hint) {
+        const h = document.createElement('div');
+        h.id = 'silencer-hint';
+        h.className = 'silencer-hint';
+        h.textContent = '🔒 你被封口了！只能劈或开';
+        biddingArea.insertBefore(h, biddingArea.firstChild);
+      }
+    } else {
+      const hint = document.getElementById('silencer-hint');
+      if (hint) hint.remove();
+    }
   } else {
     biddingArea.style.display = 'none';
     challengedArea.style.display = 'none';
@@ -1932,3 +2102,202 @@ function init() {
 }
 
 init();
+
+// =============== 技能系统 - UI ===============
+function updateSkillBar() {
+  const bar = document.getElementById('skill-bar');
+  if (!bar) return;
+
+  if (!state.skillMode || state.skillMode === 'none' || !state.mySkill) {
+    bar.style.display = 'none';
+    bar.innerHTML = '';
+    return;
+  }
+
+  const s = state.mySkill;
+  const isPassive = s.type === 'passive';
+  const used = !!s.used;
+
+  // 按钮禁用时机判断
+  let disabled = used || isPassive;
+  let timingHint = '';
+  if (!disabled) {
+    // 主动技能：参照服务端时机定义
+    const needMyTurn = ['peek', 'silencer', 'reroll', 'bigReroll'].includes(s.id);
+    if (needMyTurn && !state.isMyTurn) {
+      disabled = true;
+      timingHint = '仅自己回合可用';
+    }
+    if ((s.id === 'reroll' || s.id === 'bigReroll') && state.lastBid) {
+      disabled = true;
+      timingHint = '仅第一次叫数前可用';
+    }
+  }
+
+  const stateLabel = isPassive
+    ? '<span class="skill-state passive">被动生效</span>'
+    : (used ? '<span class="skill-state used">本局已用</span>' : `<span class="skill-state ready">可用</span>`);
+
+  bar.style.display = 'flex';
+  bar.innerHTML = `
+    <div class="skill-info">
+      <span class="skill-icon">${s.icon || '🎭'}</span>
+      <div class="skill-text">
+        <div class="skill-name-line">${s.name}${stateLabel}</div>
+        <div class="skill-desc-line">${s.desc || ''}</div>
+      </div>
+    </div>
+    ${isPassive ? '' : `
+      <button class="btn btn-primary btn-skill-use" id="btn-use-skill" ${disabled ? 'disabled' : ''}>
+        ${used ? '已用' : (timingHint ? timingHint : '使用')}
+      </button>
+    `}
+  `;
+
+  const btn = document.getElementById('btn-use-skill');
+  if (btn && !disabled) {
+    btn.onclick = () => triggerSkillUse();
+  }
+}
+
+function triggerSkillUse() {
+  const s = state.mySkill;
+  if (!s || s.type === 'passive' || s.used) return;
+
+  if (s.id === 'peek') {
+    showSkillTargetModal('peek');
+    return;
+  }
+  if (s.id === 'reroll') {
+    showSkillDiceModal();
+    return;
+  }
+  if (s.id === 'bigReroll') {
+    // 直接确认
+    if (!confirm('确认放弃当前 5 颗骰子，全部重摇？')) return;
+    sendMsg('use_skill', { skillId: 'bigReroll' });
+    return;
+  }
+  if (s.id === 'silencer') {
+    if (!state.isMyTurn) {
+      showToast('封口需要在自己回合激活', 'error');
+      return;
+    }
+    sendMsg('use_skill', { skillId: 'silencer' });
+    showToast('🔒 封口已激活，下次叫数后下家只能劈或认输', 'success');
+    return;
+  }
+}
+
+// 选目标玩家（透视）
+function showSkillTargetModal(skillId) {
+  const list = document.getElementById('skill-target-list');
+  const title = document.getElementById('skill-target-title');
+  if (!list) return;
+
+  title.textContent = skillId === 'peek' ? '👁️ 偷看谁的骰子？' : '选一位玩家';
+
+  const candidates = state.playerOrder.filter(p => p.id !== state.playerId);
+  list.innerHTML = candidates.map(p => `
+    <button class="skill-target-btn" data-target="${p.id}">
+      <span class="target-name">${p.nickname}</span>
+      <span class="target-arrow">→</span>
+    </button>
+  `).join('');
+
+  list.onclick = (e) => {
+    const btn = e.target.closest('.skill-target-btn');
+    if (!btn) return;
+    const targetId = btn.dataset.target;
+    hideModal('modal-skill-target');
+    sendMsg('use_skill', { skillId, targetId });
+  };
+
+  showModal('modal-skill-target');
+}
+
+// 选要换的骰子（换骰）
+function showSkillDiceModal() {
+  const list = document.getElementById('skill-dice-list');
+  if (!list) return;
+
+  list.innerHTML = (state.myDice || []).map((v, i) => `
+    <button class="skill-dice-btn" data-idx="${i}">
+      <div class="die revealed" data-value="${v}">${createDiceDots(v)}</div>
+      <div class="dice-idx">第${i + 1}颗</div>
+    </button>
+  `).join('');
+
+  list.onclick = (e) => {
+    const btn = e.target.closest('.skill-dice-btn');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.idx, 10);
+    hideModal('modal-skill-dice');
+    sendMsg('use_skill', { skillId: 'reroll', diceIndex: idx });
+  };
+
+  showModal('modal-skill-dice');
+}
+
+document.getElementById('btn-cancel-skill-target').addEventListener('click', () => hideModal('modal-skill-target'));
+document.getElementById('btn-cancel-skill-dice').addEventListener('click', () => hideModal('modal-skill-dice'));
+
+// 收到"某人用了某技能"广播
+function handleSkillUsedBroadcast(data) {
+  const isMe = data.playerId === state.playerId;
+  const name = isMe ? '你' : data.nickname;
+
+  let text = `${data.skillIcon || '🎭'} ${name} 使用了【${data.skillName}】`;
+  if (data.publicData) {
+    if (data.publicData.targetNickname) {
+      text += ` → ${data.publicData.targetNickname}`;
+    } else if (data.publicData.changedCount) {
+      text += `（换了 ${data.publicData.changedCount} 颗骰子）`;
+    } else if (data.publicData.message) {
+      text = `${data.skillIcon || '🎭'} ${name}：${data.publicData.message}`;
+    }
+  }
+  showToast(text, 'success');
+
+  // 如果是自己，更新本地 used 状态
+  if (isMe && state.mySkill) {
+    state.mySkill.used = true;
+  }
+  updateSkillBar();
+}
+
+// 收到"透视结果"——只发给使用者
+function handleSkillPeekResult(data) {
+  state.peekedMap[data.targetId] = {
+    idx: data.diceIndex,
+    value: data.diceValue,
+    nickname: data.targetNickname
+  };
+  showToast(`👁️ ${data.targetNickname} 的第 ${data.diceIndex + 1} 颗是【${data.diceValue}】`, 'success');
+
+  // 在该对手的骰子区高亮那一颗
+  const container = document.getElementById(`opponent-dice-${data.targetId}`);
+  if (container) {
+    const dice = container.querySelectorAll('.die');
+    const die = dice[data.diceIndex];
+    if (die) {
+      die.classList.remove('hidden');
+      die.classList.add('peeked');
+      die.dataset.value = data.diceValue;
+      die.innerHTML = createDiceDots(data.diceValue);
+    }
+  }
+}
+
+// 收到"换骰结果"——只发给使用者
+function handleSkillRerollResult(data) {
+  state.myDice = data.newDice;
+  renderMyDice(data.newDice);
+  if (data.bigReroll) {
+    showToast(`🎲🎲 5 颗骰子已全部重摇`, 'success');
+  } else {
+    showToast(`🎲 ${data.oldValue} → ${data.newValue}`, 'success');
+  }
+  if (window.Sound) window.Sound.shake();
+  updateSkillBar();
+}

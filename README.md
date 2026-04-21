@@ -226,6 +226,12 @@ pm2 save
 | `opponent_disconnected` / `opponent_reconnected` | 对手断线/重连 |
 | `game_state` | 完整状态（重连用，含 `ruleSet`） |
 | `error` | 错误提示 |
+| `skill_used` | 某人使用了技能的公开广播（v2.6） |
+| `skill_peek_result` | 透视结果（仅发给使用者，含骰子值）（v2.6） |
+| `skill_reroll_result` | 换骰/大换骰结果（仅发给使用者）（v2.6） |
+| `skill_peeked` | 被透视提示（仅发给被看者）（v2.6） |
+
+> v2.6 起，`room_created` / `room_joined` / `player_info` / `game_start` / `game_state` 均携带 `skillMode` 字段（`none` / `random` / `choose`），以及 `you.skill` / `playerOrder[].skill` 的技能信息（含 `id/name/icon/type/desc/used`）。`bid_made` 新增 `silencerOn / silencerBy / silencerTarget` 字段，前端据此禁用被封口玩家的叫数按钮。
 
 > v2.5 起，`room_created` / `room_joined` / `player_info` / `game_start` / `game_state` 均携带 `ruleSet` 字段（含 `preset`、`singleBehavior`、`oneAsWildMode`、`zhaiToFly`、`flyToZhai` 等），前端据此动态渲染规则徽章与叫数合法性。`bid_made` 新增 `onesCalled` 标志，用于"过1不癞"模式下切换 1 是否当癞。`game_settled` 新增 `type: 'singleStreak'` 分支，用于单骰重摇模式下连续 3 次单骰直接判负。
 
