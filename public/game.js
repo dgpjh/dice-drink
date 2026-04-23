@@ -445,6 +445,14 @@ function handleMessage(msg) {
     case 'skill_peeked':
       showToast(data.message || '💀 有人偷看了你的骰子', 'error');
       break;
+
+    case 'skill_choose_progress':
+      handleSkillChooseProgress(data);
+      break;
+
+    case 'skill_choose_waiting':
+      handleSkillChooseWaiting(data);
+      break;
   }
 }
 
@@ -881,6 +889,73 @@ function updateSkillChoosePanel() {
     grid.querySelectorAll('.skill-choose-card').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   };
+
+  // 初次/每次更新时根据 state.playerOrder 渲染一次进度
+  renderSkillChooseProgress(state.playerOrder || []);
+}
+
+/**
+ * 渲染自选进度（服务端 skill_choose_progress / skill_choose_waiting 也会调用）
+ */
+function renderSkillChooseProgress(progress) {
+  const list = document.getElementById('skill-choose-progress-list');
+  const hint = document.getElementById('skill-choose-progress-hint');
+  const wrap = document.getElementById('skill-choose-progress');
+  if (!list || !wrap) return;
+
+  if (!progress || !progress.length) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+
+  const total = progress.length;
+  const chosenCount = progress.filter(p => p.chosen || (p.skill && p.skill.id)).length;
+
+  list.innerHTML = progress.map(p => {
+    // 兼容两种字段：player_info 推来的 { skill:{...} } 和 skill_choose_progress 推来的 { skillIcon, skillName, chosen }
+    const skillIcon = p.skillIcon || (p.skill && p.skill.icon) || '';
+    const skillName = p.skillName || (p.skill && p.skill.name) || '';
+    const chosen = p.chosen || !!(p.skill && p.skill.id);
+    const isMe = p.id === state.playerId;
+    return `
+      <div class="skill-progress-item ${chosen ? 'done' : 'pending'}">
+        <span class="skill-progress-status">${chosen ? '✅' : '⏳'}</span>
+        <span class="skill-progress-name">${p.nickname}${isMe ? '（你）' : ''}</span>
+        <span class="skill-progress-skill">${chosen ? `${skillIcon} ${skillName}` : '选择中...'}</span>
+      </div>
+    `;
+  }).join('');
+
+  if (hint) {
+    if (chosenCount === total) {
+      hint.textContent = '✨ 所有玩家已就绪，即将开始！';
+      hint.classList.add('ready');
+    } else {
+      hint.textContent = `等待中... ${chosenCount} / ${total}`;
+      hint.classList.remove('ready');
+    }
+  }
+}
+
+/**
+ * 服务端推送：某人选/改了技能
+ */
+function handleSkillChooseProgress(data) {
+  if (!data) return;
+  // 提示（非自己）
+  if (data.playerId !== state.playerId) {
+    showToast(`${data.nickname} 选择了 ${data.skillIcon || ''} ${data.skillName || ''}`, 'success');
+  }
+  renderSkillChooseProgress(data.progress || []);
+}
+
+/**
+ * 服务端推送：满员但仍有人未选，等待中
+ */
+function handleSkillChooseWaiting(data) {
+  if (!data) return;
+  renderSkillChooseProgress(data.progress || []);
 }
 
 function startRoomCountdown() {

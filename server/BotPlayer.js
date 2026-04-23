@@ -83,9 +83,9 @@ class BotPlayer {
 
     const id = mySkill.id;
 
-    // peek：本局自己第一次操作时，30% 概率偷看一个真人对手（优先真人，没真人就挑机器人）
+    // peek：本局 17% 概率偷看一个真人对手（优先真人，没真人就挑机器人）
     if (id === 'peek') {
-      if (Math.random() < 0.35) {
+      if (Math.random() < 0.17) {
         const candidates = (allPlayers || []).filter(p => p.id !== myPlayerId);
         if (candidates.length === 0) return null;
         // 优先挑真人
@@ -97,41 +97,42 @@ class BotPlayer {
       return null;
     }
 
-    // reroll / bigReroll：仅在本局第一次叫数前使用（lastBid 为 null）
+    // reroll / bigReroll：仅在「自己本局还没叫过数」时使用
     if (id === 'reroll' || id === 'bigReroll') {
-      if (lastBid) return null;
+      // 自己已经叫过数则不能用
+      const { bids } = context;
+      const myBids = (bids || []).filter(b => b.playerId === myPlayerId);
+      if (myBids.length > 0) return null;
       // 评估自己的手牌好坏
       const counts = {};
       for (const d of myDice) counts[d] = (counts[d] || 0) + 1;
-      const maxSame = Math.max(...Object.values(counts));
       const uniq = Object.keys(counts).length;
       // 单骰或散牌（5种全不同 / 最多2同）更可能换
       if (id === 'reroll') {
         // 找到最稀有的单颗骰子
-        if (uniq >= 4 && Math.random() < 0.6) {
+        if (uniq >= 4 && Math.random() < 0.3) {
           // 找出现次数最少的骰子
-          let worstIdx = 0, worstVal = myDice[0], worstCount = counts[myDice[0]];
+          let worstIdx = 0, worstCount = counts[myDice[0]];
           for (let i = 0; i < myDice.length; i++) {
             if (counts[myDice[i]] < worstCount) {
               worstCount = counts[myDice[i]];
-              worstVal = myDice[i];
               worstIdx = i;
             }
           }
           return { action: 'use_skill', data: { skillId: 'reroll', diceIndex: worstIdx } };
         }
       } else {
-        // bigReroll：只在明显劣势手牌（uniq=5 单骰 or maxSame<=1）时用
-        if (uniq === 5 && Math.random() < 0.7) {
+        // bigReroll：只在明显劣势手牌（uniq=5 单骰）时用
+        if (uniq === 5 && Math.random() < 0.35) {
           return { action: 'use_skill', data: { skillId: 'bigReroll' } };
         }
       }
       return null;
     }
 
-    // silencer：在自己要叫数时，40% 概率提前激活
+    // silencer：在自己要叫数时，20% 概率提前激活
     if (id === 'silencer') {
-      if (Math.random() < 0.4) {
+      if (Math.random() < 0.2) {
         return { action: 'use_skill', data: { skillId: 'silencer' } };
       }
       return null;

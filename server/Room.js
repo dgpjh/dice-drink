@@ -76,8 +76,12 @@ class Room {
     if (this.skillMode === 'random') {
       skillId = randomSkillId();
     } else if (this.skillMode === 'choose') {
-      // 先给个占位，真人需要后续调用 chooseSkill 修改；机器人进房时已通过 opts.presetSkill 指定
-      skillId = opts.presetSkill || null;
+      // 真人：先给个空，等 chooseSkill 更新；机器人：用人设绑定，没绑定就随机兜底
+      if (opts.isBot) {
+        skillId = opts.presetSkill || randomSkillId();
+      } else {
+        skillId = opts.presetSkill || null;
+      }
     }
     // 机器人可以强制用人设绑定的技能（opts.presetSkill）
     if (opts.presetSkill && this.skillMode !== 'none') {
@@ -126,7 +130,26 @@ class Room {
 
     player.skill = createSkillState(skillId);
     this.broadcastPlayerInfo();
-    return { success: true };
+
+    // 广播进度（给前端"玩家A 选择了斧头帮"这种提示用）
+    this.broadcast('skill_choose_progress', {
+      playerId,
+      nickname: player.nickname,
+      skillId: player.skill.id,
+      skillName: player.skill.name,
+      skillIcon: player.skill.icon,
+      progress: this.playerOrder.map(pid => ({
+        id: pid,
+        nickname: this.players[pid].nickname,
+        skillId: this.players[pid].skill ? this.players[pid].skill.id : null,
+        skillName: this.players[pid].skill ? this.players[pid].skill.name : null,
+        skillIcon: this.players[pid].skill ? this.players[pid].skill.icon : null,
+        chosen: !!(this.players[pid].skill && this.players[pid].skill.id)
+      })),
+      allChosen: this.allHumansChoseSkill()
+    });
+
+    return { success: true, allChosen: this.allHumansChoseSkill() };
   }
 
   removePlayer(playerId) {
@@ -211,8 +234,39 @@ class Room {
 
   // =============== 游戏流程 ===============
 
+  /**
+   * 所有真人玩家是否都已选好技能（仅在 skillMode='choose' 时有意义）
+   */
+  allHumansChoseSkill() {
+    if (this.skillMode !== 'choose') return true;
+    for (const pid of this.playerOrder) {
+      const p = this.players[pid];
+      if (!p) continue;
+      // 机器人由 presetSkill 兜底，理论上不会为空
+      if (!p.skill || !p.skill.id) return false;
+    }
+    return true;
+  }
+
   startGame() {
     if (this.playerOrder.length < 2) return;
+
+    // 自选模式下，所有玩家都必须已选技能才能开局
+    if (this.skillMode === 'choose' && !this.allHumansChoseSkill()) {
+      // 广播一条提示，等所有人选完后再由 chooseSkill 尝试触发 startGame
+      this.broadcast('skill_choose_waiting', {
+        message: '还有玩家未选择技能，等待中...',
+        progress: this.playerOrder.map(pid => ({
+          id: pid,
+          nickname: this.players[pid].nickname,
+          skillId: this.players[pid].skill ? this.players[pid].skill.id : null,
+          skillName: this.players[pid].skill ? this.players[pid].skill.name : null,
+          skillIcon: this.players[pid].skill ? this.players[pid].skill.icon : null,
+          chosen: !!(this.players[pid].skill && this.players[pid].skill.id)
+        }))
+      });
+      return;
+    }
 
     this.phase = PHASE.ROLLING;
 
@@ -350,15 +404,17 @@ class Room {
     }
 
     // 时机校验：多数技能要求在自己回合
-    if (def.timing === 'myTurn' || def.timing === 'myTurnBeforeFirstBid' || def.timing === 'myTurnBeforeBid') {
+    if (def.timing === 'myTurn' || def.timing === 'myFirstTurnBeforeBid' || def.timing === 'myTurnBeforeBid') {
       if (this.currentGame.currentTurn !== playerId) {
         return { success: false, reason: '请在自己回合使用技能' };
       }
     }
-    if (def.timing === 'myTurnBeforeFirstBid') {
-      // 本局还没有任何叫数（lastBid 为空）
-      if (this.currentGame.lastBid) {
-        return { success: false, reason: '本局已有人叫数，此技能只能在第一次叫数前使用' };
+    if (def.timing === 'myFirstTurnBeforeBid') {
+      // 换骰/大换骰：只能在自己「本局第一次叫数前」使用
+      // 即：自己还没叫过数（bids 中没有自己的记录）
+      const myBids = (this.currentGame.bids || []).filter(b => b.playerId === playerId);
+      if (myBids.length > 0) {
+        return { success: false, reason: '你已叫过数，此技能只能在自己本局首次叫数前使用' };
       }
     }
 

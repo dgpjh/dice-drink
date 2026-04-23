@@ -607,6 +607,14 @@ wss.on('connection', (ws) => {
         const result = room.chooseSkill(playerId, data.skillId);
         if (!result.success) {
           ws.send(JSON.stringify({ type: 'error', data: { message: result.reason } }));
+          break;
+        }
+        // 自选模式下，所有人选完 + 满员，触发开局
+        if (result.allChosen && room.playerOrder.length === room.maxPlayers) {
+          setTimeout(() => {
+            room.startGame();
+            setTimeout(() => scheduleBotAction(currentRoomCode), 500);
+          }, 1500);
         }
         break;
       }

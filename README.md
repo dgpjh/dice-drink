@@ -230,6 +230,10 @@ pm2 save
 | `skill_peek_result` | 透视结果（仅发给使用者，含骰子值）（v2.6） |
 | `skill_reroll_result` | 换骰/大换骰结果（仅发给使用者）（v2.6） |
 | `skill_peeked` | 被透视提示（仅发给被看者）（v2.6） |
+| `skill_choose_progress` | 自选模式：某人选/改技能的进度广播（v2.6.1） |
+| `skill_choose_waiting` | 自选模式：满员但仍有人未选时的等待提示（v2.6.1） |
+
+> **v2.6.1 调整**：① 换骰/大换骰改为仅能在自己**本局第一次叫数前**使用（之前是"本局还没有任何叫数"）；② 自选模式下所有玩家选完技能才会开局，期间在 waiting 页实时展示选人进度；③ 机器人使用主动技能的概率下调（透视 35→17%，换骰 60→30%，大换骰 70→35%，封口 40→20%）。
 
 > v2.6 起，`room_created` / `room_joined` / `player_info` / `game_start` / `game_state` 均携带 `skillMode` 字段（`none` / `random` / `choose`），以及 `you.skill` / `playerOrder[].skill` 的技能信息（含 `id/name/icon/type/desc/used`）。`bid_made` 新增 `silencerOn / silencerBy / silencerTarget` 字段，前端据此禁用被封口玩家的叫数按钮。
 

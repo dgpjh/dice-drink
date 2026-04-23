@@ -28,9 +28,9 @@ const SKILLS = {
     icon: '🎲',
     type: 'active',
     desc: '换掉自己 1 颗骰子',
-    tip: '本局叫数前使用，选择 1 颗骰子重摇',
+    tip: '只能在自己本局第一次叫数前使用',
     maxUsePerGame: 1,
-    timing: 'myTurnBeforeFirstBid',  // 本局第一次叫数前
+    timing: 'myFirstTurnBeforeBid',  // 自己第一个回合、自己还没叫过数时
     needDiceIndex: true              // 需要选择骰子索引
   },
   bigReroll: {
@@ -39,9 +39,9 @@ const SKILLS = {
     icon: '🎲🎲',
     type: 'active',
     desc: '全部 5 颗骰子重摇',
-    tip: '本局叫数前使用，放弃现在的所有骰子',
+    tip: '只能在自己本局第一次叫数前使用',
     maxUsePerGame: 1,
-    timing: 'myTurnBeforeFirstBid'
+    timing: 'myFirstTurnBeforeBid'
   },
   silencer: {
     id: 'silencer',

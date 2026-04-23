@@ -1918,6 +1918,80 @@ html, body {
   line-height: 1.4;
 }
 
+/* 自选进度区 */
+.skill-choose-progress {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+
+.skill-choose-progress-title {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.skill-choose-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.skill-progress-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.skill-progress-item.done {
+  color: var(--text);
+  border: 1px solid rgba(176, 38, 255, 0.35);
+}
+
+.skill-progress-item.pending {
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+}
+
+.skill-progress-status {
+  font-size: 13px;
+}
+
+.skill-progress-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.skill-progress-skill {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--primary-light);
+}
+
+.skill-progress-item.pending .skill-progress-skill {
+  color: var(--text-muted);
+}
+
+.skill-choose-progress-hint {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+}
+
+.skill-choose-progress-hint.ready {
+  color: var(--neon-pink);
+  font-weight: 700;
+  font-style: normal;
+}
+
 /* =============== 对局 - 技能栏 =============== */
 .skill-bar {
   display: flex;
