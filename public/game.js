@@ -850,7 +850,7 @@ function updateSkillModeBadge() {
 }
 
 // waiting 页面的技能自选面板
-function updateSkillChoosePanel() {
+async function updateSkillChoosePanel() {
   const panel = document.getElementById('skill-choose-panel');
   const grid = document.getElementById('skill-choose-grid');
   if (!panel || !grid) return;
@@ -858,6 +858,11 @@ function updateSkillChoosePanel() {
   if (state.skillMode !== 'choose') {
     panel.style.display = 'none';
     return;
+  }
+
+  // 后加入的玩家没点过「创建房间」弹窗，skillsCatalog 可能是空的，这里兜底拉一次
+  if (!state.skillsCatalog || !state.skillsCatalog.length) {
+    await ensureRulesCatalog();
   }
 
   const skills = state.skillsCatalog || [];
@@ -2203,9 +2208,14 @@ function updateSkillBar() {
       disabled = true;
       timingHint = '仅自己回合可用';
     }
-    if ((s.id === 'reroll' || s.id === 'bigReroll') && state.lastBid) {
-      disabled = true;
-      timingHint = '仅第一次叫数前可用';
+    // 换骰/大换骰：只要自己本局还没叫过数就能用（即使别人已经叫过）
+    if (s.id === 'reroll' || s.id === 'bigReroll') {
+      const bids = state.bids || [];
+      const myBids = bids.filter(b => b.playerId === state.playerId);
+      if (myBids.length > 0) {
+        disabled = true;
+        timingHint = '你已叫过数';
+      }
     }
   }
 

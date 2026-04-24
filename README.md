@@ -233,6 +233,8 @@ pm2 save
 | `skill_choose_progress` | 自选模式：某人选/改技能的进度广播（v2.6.1） |
 | `skill_choose_waiting` | 自选模式：满员但仍有人未选时的等待提示（v2.6.1） |
 
+> **v2.6.2 修复**：① **劈骰胜负判定 bug**：反劈偶数次后 opener 可能等于 lastBidder，旧代码会同时把同一个人当 winner 和 loser，导致结果页胜负错乱。现改为劈骰分支下用 `challenge.initiator ↔ target` 两人对决（参考 `resolveGame`）。② **后加入玩家无法选技能**：非房主用户没点过"创建房间"弹窗，前端 `state.skillsCatalog` 为空。现在 `updateSkillChoosePanel` 内部兜底调用 `ensureRulesCatalog()`。③ **换骰技能禁用条件修正**：前端把"全场有任何叫数"当禁用条件，导致非先手玩家永远用不了；现改为"自己本局已叫过数"才禁用（和服务端一致）。④ 好运姐 1 点概率从 1/5 上调至 **1/4**（其他点数各 3/20）。
+
 > **v2.6.1 调整**：① 换骰/大换骰改为仅能在自己**本局第一次叫数前**使用（之前是"本局还没有任何叫数"）；② 自选模式下所有玩家选完技能才会开局，期间在 waiting 页实时展示选人进度；③ 机器人使用主动技能的概率下调（透视 35→17%，换骰 60→30%，大换骰 70→35%，封口 40→20%）。
 
 > v2.6 起，`room_created` / `room_joined` / `player_info` / `game_start` / `game_state` 均携带 `skillMode` 字段（`none` / `random` / `choose`），以及 `you.skill` / `playerOrder[].skill` 的技能信息（含 `id/name/icon/type/desc/used`）。`bid_made` 新增 `silencerOn / silencerBy / silencerTarget` 字段，前端据此禁用被封口玩家的叫数按钮。

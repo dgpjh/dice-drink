@@ -66,7 +66,7 @@ const SKILLS = {
     name: '好运姐',
     icon: '🍀',
     type: 'passive',
-    desc: '摇骰时，摇到 1 的概率 1/6 → 1/5',
+    desc: '摇骰时，摇到 1 的概率 1/6 → 1/4',
     tip: '被动生效，整场比赛都触发'
   }
 };
@@ -140,7 +140,7 @@ function createSkillState(skillId) {
 
 /**
  * 摇骰时根据好运姐技能做概率偏置
- * 好运姐：每颗骰子有 1/5 概率是 1，其他 4/5 均分到 2-6
+ * 好运姐：每颗骰子有 1/4 概率是 1，其他 3/4 均分到 2-6（各 3/20 ≈ 15%）
  * @param {number} count
  * @param {boolean} isLucky
  * @returns {number[]}
@@ -149,9 +149,9 @@ function rollDiceWithSkill(count, isLucky) {
   const dice = [];
   for (let i = 0; i < count; i++) {
     if (isLucky) {
-      // 1/5 概率出 1；4/5 概率出 2-6 各 1/5（= 4/25）
+      // 1/4 概率出 1；3/4 概率出 2-6 各 3/20
       const r = Math.random();
-      if (r < 1 / 5) {
+      if (r < 1 / 4) {
         dice.push(1);
       } else {
         dice.push(2 + Math.floor(Math.random() * 5));

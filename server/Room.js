@@ -897,6 +897,19 @@ class Room {
 
   /**
    * 开骰结算（支持多人）
+   *
+   * 胜负判定规则：
+   *   - 普通开（非劈骰阶段）：opener 与 lastBidder 对决
+   *       叫数成立(true)  → opener 输（多开了）
+   *       叫数不成立(false) → lastBidder 输（骗叫）
+   *   - 劈骰后开（由 handleChallengeOpen 进入）：
+   *       整场劈骰就是 initiator ↔ target 两人博弈，反劈反复踢，
+   *       最终"开"的那方就是 openerPlayerId，对立面（challenge loser 另一方）固定为两人中的另一位。
+   *       判定逻辑：
+   *         - 叫数成立 → 开的人输（他以为叫数虚、但实际成立）→ loser=opener, winner=对立面
+   *         - 叫数不成立 → 开的人赢 → winner=opener, loser=对立面
+   *       ⚠️ 这里 "对立面" 不是 lastBidder（反劈偶数次后 opener 可能就是 lastBidder 本人），
+   *          而是 challenge.initiator / challenge.target 里除 opener 外的那个。
    */
   resolveGame(openerPlayerId, resultType, multiplier) {
     const lastBid = this.currentGame.lastBid;
@@ -915,16 +928,33 @@ class Room {
       { onesCalled: this.currentGame.onesCalled }
     );
 
-    // 判定输赢（开的人 vs 上一位叫数者）
+    // 判定输赢
     let winner, loser;
-    if (result.bidEstablished) {
-      // 叫数成立 → 开的人输
-      loser = openerPlayerId;
-      winner = lastBidder;
+    const challenge = this.currentGame.challenge;
+    if (challenge && resultType === 'open') {
+      // 劈骰后开骰 → 胜负在 initiator/target 之间
+      // opener 可能是 initiator 也可能是 target（取决于反劈奇偶次数）
+      const opponent = (openerPlayerId === challenge.initiator)
+        ? challenge.target
+        : challenge.initiator;
+      if (result.bidEstablished) {
+        // 叫数成立 → 开骰的人输（虚开）
+        loser = openerPlayerId;
+        winner = opponent;
+      } else {
+        // 叫数不成立 → 开骰的人赢
+        winner = openerPlayerId;
+        loser = opponent;
+      }
     } else {
-      // 叫数不成立 → 叫的人输
-      loser = lastBidder;
-      winner = openerPlayerId;
+      // 普通开骰（非劈骰分支）：opener vs lastBidder
+      if (result.bidEstablished) {
+        loser = openerPlayerId;
+        winner = lastBidder;
+      } else {
+        loser = lastBidder;
+        winner = openerPlayerId;
+      }
     }
 
     const score = GameEngine.calculateScore(resultType, multiplier);
