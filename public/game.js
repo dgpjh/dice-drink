@@ -52,6 +52,7 @@ const state = {
   mySkill: null,               // 我的技能 { id, name, icon, type, desc, used }
   silencerTarget: null,        // 被封口的目标玩家id（下家不能叫数）
   silencerBy: null,            // 封口发起者
+  myPendingSilencer: false,    // v2.6.4：我已激活封口，等待下次叫数生效
   peekedMap: {},               // 透视过的骰子缓存 { targetId: { idx, value, nickname } }
   skillsCatalog: [],           // 所有技能定义（给"自选"模式用）
 
@@ -229,6 +230,7 @@ function handleMessage(msg) {
       state.onesCalled = false;
       state.silencerTarget = null;
       state.silencerBy = null;
+      state.myPendingSilencer = false;
       state.peekedMap = {};
       if (data.ruleSet) state.ruleSet = data.ruleSet;
       if (data.skillMode) state.skillMode = data.skillMode;
@@ -256,6 +258,10 @@ function handleMessage(msg) {
       if (data.silencerOn) {
         state.silencerBy = data.silencerBy;
         state.silencerTarget = data.silencerTarget;
+        // v2.6.4：如果是自己激活的封口已被消耗，清除 pending 徽章
+        if (data.silencerBy === state.playerId) {
+          state.myPendingSilencer = false;
+        }
         const byName = getPlayerName(data.silencerBy);
         const tgtName = data.silencerTarget === state.playerId ? '你' : getPlayerName(data.silencerTarget);
         showToast(`🔒 ${byName} 激活封口！${tgtName} 只能劈或认输`, 'success');
@@ -328,6 +334,10 @@ function handleMessage(msg) {
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
       }
+      // v2.6.4：一局结束，清理 pending 状态
+      state.myPendingSilencer = false;
+      state.silencerTarget = null;
+      state.silencerBy = null;
       clearTimer();
       // 震屏 + 闪白
       triggerOpenEffects();
@@ -386,8 +396,14 @@ function handleMessage(msg) {
     case 'play_again_request':
       showToast(`${data.nickname} 想再整一局！（${data.readyCount}/${data.totalPlayers}）`, 'success');
       const playAgainBtn = document.getElementById('btn-play-again');
-      playAgainBtn.disabled = false;
-      playAgainBtn.textContent = `🎲 ${data.readyCount}/${data.totalPlayers} 已就位，速进！`;
+      // v2.6.4：如果是自己发的请求，保持 disabled 状态避免闪烁
+      const isMyRequest = data.playerId === state.playerId || data.nickname === state.nickname;
+      if (!isMyRequest && !state.playAgainClicked) {
+        playAgainBtn.disabled = false;
+      }
+      playAgainBtn.textContent = state.playAgainClicked
+        ? `等其他人续杯...（${data.readyCount}/${data.totalPlayers}）`
+        : `🎲 ${data.readyCount}/${data.totalPlayers} 已就位，速进！`;
       playAgainBtn.classList.add('btn-glow');
       break;
 
@@ -1139,6 +1155,8 @@ function renderAllOpponentDice(revealed, allDice) {
     const container = document.getElementById(`opponent-dice-${op.id}`);
     if (!container) continue;
     container.innerHTML = '';
+    // v2.6.4：恢复已透视过的骰子，避免被后续重绘刷白
+    const peeked = state.peekedMap && state.peekedMap[op.id];
     for (let i = 0; i < 5; i++) {
       const die = document.createElement('div');
       if (revealed && allDice && allDice[op.id]) {
@@ -1146,6 +1164,11 @@ function renderAllOpponentDice(revealed, allDice) {
         die.className = 'die revealed';
         die.dataset.value = dice[i];
         die.innerHTML = createDiceDots(dice[i]);
+      } else if (!revealed && peeked && peeked.idx === i) {
+        // 已透视过的那一颗，保持显示
+        die.className = 'die peeked';
+        die.dataset.value = peeked.value;
+        die.innerHTML = createDiceDots(peeked.value);
       } else {
         die.className = 'die hidden';
         die.textContent = '?';
@@ -1243,7 +1266,19 @@ function updateActionArea() {
       biddingArea.style.display = 'none';
       challengedArea.style.display = 'none';
       waitingArea.style.display = 'block';
-      waitingText.textContent = `⚡ 等待劈骰结果...`;
+      // v2.6.4：显示劈者 → 被劈者，避免旁观者不清楚谁在劈谁
+      let waitingMsg = '⚡ 等待劈骰结果...';
+      const ch = state.challenge;
+      if (ch && (ch.challenger || ch.currentTurn)) {
+        const challengerId = ch.challenger || ch.player;
+        const targetId = ch.target || ch.currentTurn;
+        if (challengerId && targetId) {
+          const chName = getPlayerName(challengerId);
+          const tgName = targetId === state.playerId ? '你' : getPlayerName(targetId);
+          waitingMsg = `⚡ ${chName} 正在劈 ${tgName}... ×${ch.multiplier || 1}`;
+        }
+      }
+      waitingText.textContent = waitingMsg;
     }
     return;
   }
@@ -1748,7 +1783,11 @@ function showSettlementPage(data) {
   const diceArea = document.getElementById('settlement-dice-area');
   diceArea.innerHTML = '';
 
-  if (data.allDice) {
+  // v2.6.4：认输/超时/断线/连摇单骰场景未开牌，不展示骰子区，改为提示文案
+  const noRevealTypes = ['surrender', 'timeout', 'disconnect', 'singleStreak', 'reconnect'];
+  const shouldReveal = !noRevealTypes.includes(data.type);
+
+  if (shouldReveal && data.allDice) {
     // 按 playerOrder 排序展示
     const orderedPids = (data.playerOrder || state.playerOrder || []).map(p => p.id || p);
     const displayPids = orderedPids.length > 0 ? orderedPids : Object.keys(data.allDice);
@@ -1785,6 +1824,20 @@ function showSettlementPage(data) {
       `;
       diceArea.appendChild(div);
     }
+  } else if (!shouldReveal) {
+    // v2.6.4：未开牌场景给个提示占位
+    const tipMap = {
+      surrender: '🏳️ 未开牌 · 认输直接结算',
+      timeout: '⏱ 未开牌 · 超时直接判负',
+      disconnect: '📡 未开牌 · 断线超时判负',
+      singleStreak: '🎯 未开牌 · 连摇单骰判负',
+      reconnect: '🔄 结算信息已过期'
+    };
+    const tip = document.createElement('div');
+    tip.className = 'settlement-no-reveal';
+    tip.style.cssText = 'text-align:center;padding:24px 12px;color:var(--text-secondary);font-size:14px;opacity:.85;';
+    tip.textContent = tipMap[data.type] || '未开牌';
+    diceArea.appendChild(tip);
   }
 
   // 结算详情
@@ -1936,6 +1989,7 @@ function showSettlementPage(data) {
   playAgainBtn.disabled = false;
   playAgainBtn.textContent = '速进！再整一局';
   playAgainBtn.classList.remove('btn-glow');
+  state.playAgainClicked = false;  // v2.6.4：新局重置标记
 
   // 战绩统计
   const statsEl = document.getElementById('settlement-stats');
@@ -1962,6 +2016,7 @@ function showSettlementPage(data) {
 document.getElementById('btn-play-again').addEventListener('click', () => {
   sendMsg('play_again');
   const total = state.playerOrder.length;
+  state.playAgainClicked = true;  // v2.6.4：标记已点击
   showToast(`等其他人续杯...（1/${total}）`);
   document.getElementById('btn-play-again').disabled = true;
   document.getElementById('btn-play-again').textContent = `等其他人续杯...（1/${total}）`;
@@ -2003,7 +2058,12 @@ function handleGameStateRestore(data) {
     state.challenge = data.game.challenge;
     state.currentTurn = data.game.currentTurn;
     state.onesCalled = !!data.game.onesCalled;
+    // v2.6.4：恢复封口状态
+    state.silencerBy = data.game.silencerBy || null;
+    state.silencerTarget = data.game.silencerTarget || null;
   }
+  // v2.6.4：恢复自己激活未生效的封口
+  state.myPendingSilencer = !!(data.you && data.you.pendingSilencer);
 
   if (data.phase === 'waiting') {
     showWaitingPage({ roomCode: data.roomCode, roomInfo: { maxPlayers: data.maxPlayers, players: data.playerOrder } });
@@ -2120,7 +2180,8 @@ function sendChatMessage() {
   input.value = '';
 }
 
-let danmakuLane = 0;
+// v2.6.4：弹幕 lane 占用表，避免多人同时发言时覆盖
+const danmakuLaneBusy = [];
 function showDanmaku(data) {
   const container = document.getElementById('danmaku-container');
   if (!container) return;
@@ -2132,8 +2193,13 @@ function showDanmaku(data) {
 
   const laneHeight = 36;
   const maxLanes = Math.floor(200 / laneHeight);
-  const lane = danmakuLane % maxLanes;
-  danmakuLane++;
+  // 找第一个空闲 lane；若全满则随机选一个（降级避免丢弹幕）
+  let lane = -1;
+  for (let i = 0; i < maxLanes; i++) {
+    if (!danmakuLaneBusy[i]) { lane = i; break; }
+  }
+  if (lane === -1) lane = Math.floor(Math.random() * maxLanes);
+  danmakuLaneBusy[lane] = true;
 
   item.style.top = `${lane * laneHeight}px`;
 
@@ -2141,6 +2207,7 @@ function showDanmaku(data) {
 
   item.addEventListener('animationend', () => {
     item.remove();
+    danmakuLaneBusy[lane] = false;
   });
 }
 
@@ -2148,6 +2215,15 @@ function showDanmaku(data) {
 function init() {
   console.log('[Init] 页面加载，playerId:', state.playerId);
   connectWS();
+
+  // v2.6.4：房间码输入框实时大写 + 过滤空格/中文标点
+  const roomInput = document.getElementById('input-room-code');
+  if (roomInput) {
+    roomInput.addEventListener('input', () => {
+      const cleaned = roomInput.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 6);
+      if (roomInput.value !== cleaned) roomInput.value = cleaned;
+    });
+  }
 
   // 音效开关按钮
   const soundBtn = document.getElementById('btn-sound-toggle');
@@ -2169,13 +2245,12 @@ function init() {
   }
 
   // 首次用户交互时解锁 AudioContext（iOS/Safari 要求）
+  // v2.6.4：修正为 once: true，解锁一次后自动移除监听
   const unlockSound = () => {
     if (window.Sound) window.Sound.unlock();
-    document.removeEventListener('click', unlockSound);
-    document.removeEventListener('touchstart', unlockSound);
   };
-  document.addEventListener('click', unlockSound, { once: false });
-  document.addEventListener('touchstart', unlockSound, { once: false });
+  document.addEventListener('click', unlockSound, { once: true });
+  document.addEventListener('touchstart', unlockSound, { once: true });
 
   // 检查 URL 是否包含房间码（链接直达）
   const roomCode = getRoomCodeFromURL();
@@ -2237,13 +2312,18 @@ function updateSkillBar() {
     ? '<span class="skill-state passive">被动生效</span>'
     : (used ? '<span class="skill-state used">本局已用</span>' : `<span class="skill-state ready">可用</span>`);
 
+  // v2.6.4：封口待生效徽章
+  const pendingSilencerBadge = (s.id === 'silencer' && state.myPendingSilencer)
+    ? '<span class="skill-state pending" style="background:rgba(255,193,7,.2);color:#ffc107;border:1px solid rgba(255,193,7,.4);">🔒 待触发</span>'
+    : '';
+
   bar.style.display = 'flex';
   bar.innerHTML = `
     <div class="skill-info">
       <span class="skill-icon">${s.icon || '🎭'}</span>
       <div class="skill-text">
-        <div class="skill-name-line">${s.name}${stateLabel}</div>
-        <div class="skill-desc-line">${s.desc || ''}</div>
+        <div class="skill-name-line">${s.name}${stateLabel}${pendingSilencerBadge}</div>
+        <div class="skill-desc-line">${(s.id === 'silencer' && state.myPendingSilencer) ? '下次叫数生效，下家只能劈或认输' : (s.desc || '')}</div>
       </div>
     </div>
     ${isPassive ? '' : `
@@ -2283,7 +2363,9 @@ function triggerSkillUse() {
       return;
     }
     sendMsg('use_skill', { skillId: 'silencer' });
+    state.myPendingSilencer = true;  // v2.6.4：记录待生效状态
     showToast('🔒 封口已激活，下次叫数后下家只能劈或认输', 'success');
+    updateSkillBar();
     return;
   }
 }

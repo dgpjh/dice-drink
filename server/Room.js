@@ -93,7 +93,17 @@ class Room {
 
     this.players[playerId] = {
       id: playerId,
-      nickname: nickname || `玩家${this.playerOrder.length + 1}`,
+      nickname: (() => {
+        // v2.6.4：昵称去重，若已有同名玩家则自动加数字后缀
+        let n = nickname || `玩家${this.playerOrder.length + 1}`;
+        const existingNames = new Set(this.playerOrder.map(pid => this.players[pid].nickname));
+        if (existingNames.has(n)) {
+          let i = 2;
+          while (existingNames.has(`${n} ${i}`)) i++;
+          n = `${n} ${i}`;
+        }
+        return n;
+      })(),
       ws,
       dice: [],
       connected: true,
@@ -1332,8 +1342,16 @@ class Room {
         currentTurn: this.currentGame.currentTurn,
         onesCalled: this.currentGame.onesCalled || false,
         challenge: this.currentGame.challenge,
-        result: this.currentGame.result
+        result: this.currentGame.result,
+        // v2.6.4：重连恢复封口状态
+        silencerBy: this.currentGame.silencerBy || null,
+        silencerTarget: this.currentGame.silencerTarget || null
       };
+      // v2.6.4：重连恢复自己的 pending 封口（已激活但未生效）
+      const me = this.players[playerId];
+      if (me && me.skill && me.skill.id === 'silencer' && me.skill.pendingSilencer) {
+        state.you.pendingSilencer = true;
+      }
     }
 
     // v2.6.3：重连到结算阶段时，附带上一局结算快照
