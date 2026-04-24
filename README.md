@@ -2,7 +2,7 @@
 
 > 经典酒桌游戏线上版！支持 2-4 人在线对战，摇骰子、叫数、开骰，输了就得喝 🍺
 
-**当前版本：v2.5.7**
+**当前版本：v2.6.3**
 
 ---
 
@@ -174,6 +174,7 @@ pm2 save
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v2.6.3 | 2026-04-24 | **断线重连全面修复 + 封口退款**：① 前端 `handleGameStateRestore` 重连时补读 `data.skillMode` 和 `data.you.skill`，此前断线重连后技能栏消失、自选模式技能模式徽章错乱；② 重连到结算阶段时服务端附带 `lastSettlement` 快照，前端据此渲染完整结算页（胜负/骰子/开骰结果），此前只能看到空白统计页；③ 封口技能激活后若本人当即开骰/劈骰（未走叫数路径），现在会撤销 `used` 标记（封口"退款"），本局还能再用一次 |
 | v2.5.7 | 2026-04-21 | **机器人体验优化**：1) 同房间机器人昵称去重（`server/index.js` 过滤 `existingNames` 时 strip 🤖 前缀，修复 `BotPlayer.getRandomName` 永远失效的 bug，避免"2个同名机器人"）；2) 弹幕发言者仅限机器人（`public/trashTalk.js` 新增 `isBot/pickBotSpeaker`，`fire()` 只在场上机器人中挑 speaker，真人玩家不再"自言自语"；无机器人时静默不发） |
 | v2.5.6 | 2026-04-20 | **弹幕频次下调**：`MIN_INTERVAL` 从 800ms → 1500ms；各事件概率整体下调至约原 50%（myBid 0.25→0.15、otherBid 0.4→0.22、meChallenged 0.7→0.4、otherLose 0.85→0.55、leopard 0.9→0.7 等）；移除 onOtherLose/onLeopard/onSingle/onStreak 的 `force:true`，让节流真正生效。整体约每 2-3 个动作 1 条弹幕，避免刷屏 |
 | v2.5.5 | 2026-04-20 | **人设微调**：新疆炒米粉改为抖音御姐美女博主人设（"姐姐我叫这么多你敢跟吗""乖，叫声姐姐""弟弟你在抖什么"），覆盖 myBid/otherBid/meWinOpen/otherLose/leopard/myCounter/mySurrender 等 9 个分类 |
@@ -232,6 +233,8 @@ pm2 save
 | `skill_peeked` | 被透视提示（仅发给被看者）（v2.6） |
 | `skill_choose_progress` | 自选模式：某人选/改技能的进度广播（v2.6.1） |
 | `skill_choose_waiting` | 自选模式：满员但仍有人未选时的等待提示（v2.6.1） |
+
+> **v2.6.3 修复**：① 断线重连前端补读 `skillMode` 和 `mySkill`（否则自选模式重连后技能栏消失）；② `game_state` 在 phase=settling 时新增 `lastSettlement` 字段（上一局结算完整快照），前端断线瞬间恰逢结算也能看到胜负/骰子/倍数；③ 封口激活后若本人直接开/劈，服务端撤销技能 `used` 标记（封口不再白用）。
 
 > **v2.6.2 修复**：① **劈骰胜负判定 bug**：反劈偶数次后 opener 可能等于 lastBidder，旧代码会同时把同一个人当 winner 和 loser，导致结果页胜负错乱。现改为劈骰分支下用 `challenge.initiator ↔ target` 两人对决（参考 `resolveGame`）。② **后加入玩家无法选技能**：非房主用户没点过"创建房间"弹窗，前端 `state.skillsCatalog` 为空。现在 `updateSkillChoosePanel` 内部兜底调用 `ensureRulesCatalog()`。③ **换骰技能禁用条件修正**：前端把"全场有任何叫数"当禁用条件，导致非先手玩家永远用不了；现改为"自己本局已叫过数"才禁用（和服务端一致）。④ 好运姐 1 点概率从 1/5 上调至 **1/4**（其他点数各 3/20）。
 

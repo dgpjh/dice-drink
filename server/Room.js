@@ -36,6 +36,9 @@ class Room {
     // 对局状态
     this.currentGame = null;
 
+    // 上一局结算快照（用于断线重连到 settling 阶段时复原结算页）
+    this.lastSettlement = null;
+
     // 战绩
     this.stats = {};  // { playerId: { wins, losses, totalScore } }
 
@@ -269,6 +272,9 @@ class Room {
     }
 
     this.phase = PHASE.ROLLING;
+
+    // 开新局清理上一局结算快照
+    this.lastSettlement = null;
 
     // 每一局开始重置主动技能使用次数 + 封口激活状态
     for (const pid of this.playerOrder) {
@@ -558,6 +564,20 @@ class Room {
   }
 
   /**
+   * v2.6.3：若玩家激活了封口但没机会叫数就直接开/劈，
+   * 撤销技能的"已使用"标记，让玩家下局还能用。
+   */
+  _refundUnusedSilencer(playerId) {
+    const player = this.players[playerId];
+    if (!player || !player.skill) return;
+    if (player.skill.id !== 'silencer') return;
+    if (player.skill.pendingSilencer) {
+      player.skill.pendingSilencer = false;
+      player.skill.used = false;
+    }
+  }
+
+  /**
    * 连续单骰达到上限判负
    */
   handleSingleStreakLoss(loserPlayerId, rerollEvents) {
@@ -593,7 +613,7 @@ class Room {
       };
     }
 
-    this.broadcast('game_settled', {
+    this.broadcastSettled({
       type: 'singleStreak',
       loser: loserPlayerId,
       loserNickname: this.players[loserPlayerId].nickname,
@@ -610,6 +630,14 @@ class Room {
         nickname: this.players[id].nickname
       }))
     });
+  }
+
+  /**
+   * 广播 game_settled 并保存快照（用于断线重连）
+   */
+  broadcastSettled(payload) {
+    this.lastSettlement = payload;
+    this.broadcast('game_settled', payload);
   }
 
   /**
@@ -714,6 +742,9 @@ class Room {
       return { success: false, reason: '还没有人叫数，不能开骰' };
     }
 
+    // v2.6.3：若本人激活了封口但没机会叫数就直接开骰，撤销封口的"已使用"标记
+    this._refundUnusedSilencer(playerId);
+
     this.clearTurnTimeout();
     return this.resolveGame(playerId, 'open', 1);
   }
@@ -731,6 +762,9 @@ class Room {
     if (!this.currentGame.lastBid) {
       return { success: false, reason: '还没有人叫数，不能劈' };
     }
+
+    // v2.6.3：若本人激活了封口但没机会叫数就直接劈，撤销封口的"已使用"标记
+    this._refundUnusedSilencer(playerId);
 
     this.clearTurnTimeout();
     this.phase = PHASE.CHALLENGING;
@@ -871,7 +905,7 @@ class Room {
     }
 
     // 广播认输结算
-    this.broadcast('game_settled', {
+    this.broadcastSettled({
       type: 'surrender',
       surrenderPlayer: playerId,
       surrenderNickname: this.players[playerId].nickname,
@@ -993,7 +1027,7 @@ class Room {
     }
 
     // 广播结算
-    this.broadcast('game_settled', {
+    this.broadcastSettled({
       type: 'open',
       opener: openerPlayerId,
       openerNickname: this.players[openerPlayerId].nickname,
@@ -1116,7 +1150,7 @@ class Room {
       };
     }
 
-    this.broadcast('game_settled', {
+    this.broadcastSettled({
       type: 'timeout',
       timeoutPlayer,
       timeoutNickname: this.players[timeoutPlayer].nickname,
@@ -1232,7 +1266,7 @@ class Room {
     const winner = this.playerOrder.find(pid => pid !== playerId && this.players[pid].connected);
     if (!winner) return;
 
-    this.broadcast('game_settled', {
+    this.broadcastSettled({
       type: 'disconnect',
       disconnectedPlayer: playerId,
       disconnectedNickname: this.players[playerId].nickname,
@@ -1300,6 +1334,11 @@ class Room {
         challenge: this.currentGame.challenge,
         result: this.currentGame.result
       };
+    }
+
+    // v2.6.3：重连到结算阶段时，附带上一局结算快照
+    if (this.phase === PHASE.SETTLING && this.lastSettlement) {
+      state.lastSettlement = this.lastSettlement;
     }
 
     this.sendTo(playerId, 'game_state', state);

@@ -1985,6 +1985,9 @@ function handleGameStateRestore(data) {
   state.stats = data.stats;
   state.maxPlayers = data.maxPlayers || 2;
   if (data.ruleSet) state.ruleSet = data.ruleSet;
+  // v2.6.3：重连时恢复技能模式 + 自己的技能（否则技能栏消失）
+  if (data.skillMode) state.skillMode = data.skillMode;
+  if (data.you && data.you.skill !== undefined) state.mySkill = data.you.skill;
 
   if (data.playerOrder) {
     state.playerOrder = data.playerOrder;
@@ -2013,6 +2016,7 @@ function handleGameStateRestore(data) {
     renderMyDice(data.you.dice);
     renderAllOpponentDice(false);
     updateScoreDisplay();
+    updateSkillBar();  // v2.6.3：刷新技能栏
     document.getElementById('game-my-name').textContent = state.nickname;
 
     // 恢复叫数记录
@@ -2031,7 +2035,17 @@ function handleGameStateRestore(data) {
       });
     }
   } else if (data.phase === 'settling') {
-    showSettlementPage({ type: 'reconnect', stats: data.stats, playerOrder: data.playerOrder });
+    // v2.6.3：重连到结算阶段 —— 服务端附带 lastSettlement 快照时，直接复原完整结算页
+    if (data.lastSettlement) {
+      showSettlementPage({
+        ...data.lastSettlement,
+        stats: data.stats,
+        playerOrder: data.playerOrder
+      });
+    } else {
+      // 兜底：信息不全时简化展示
+      showSettlementPage({ type: 'reconnect', stats: data.stats, playerOrder: data.playerOrder });
+    }
   }
 }
 
