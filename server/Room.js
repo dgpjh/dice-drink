@@ -660,6 +660,23 @@ class Room {
     if (this.currentGame.currentTurn !== playerId) {
       return { success: false, reason: '不是你的回合' };
     }
+    // v2.6.5：防御客户端伪造数据
+    if (!bid || typeof bid !== 'object') {
+      return { success: false, reason: '叫数数据异常' };
+    }
+    const q = parseInt(bid.quantity, 10);
+    const v = parseInt(bid.value, 10);
+    if (!Number.isFinite(q) || q < 1 || q > this.playerOrder.length * 5) {
+      return { success: false, reason: '叫数数量非法' };
+    }
+    if (!Number.isFinite(v) || v < 1 || v > 6) {
+      return { success: false, reason: '点数非法' };
+    }
+    bid.quantity = q;
+    bid.value = v;
+    if (bid.mode && !['fly', 'zhai', 'guo1'].includes(bid.mode)) {
+      bid.mode = 'fly';
+    }
     // 封口：如果你是被封口的下家，不能叫数
     if (this.currentGame.silencerTarget === playerId) {
       return { success: false, reason: '🔒 你被封口了！只能劈或认输' };
@@ -870,10 +887,12 @@ class Room {
       return { success: false, reason: '不是你的回合' };
     }
 
-    // 斧头帮被动：如果发起劈骰的玩家是斧头帮，被劈方不能认输
-    const axeCheck = this.currentGame.challenge;
-    const challenger = this.players[axeCheck.initiator];
-    if (challenger && challenger.skill && challenger.skill.id === 'axeman') {
+    // 斧头帮被动：反劈链中「当前认输者」的对手若是斧头帮，则不能认输。
+    // 反劈后 currentTurn 会在 initiator 与 target 间轮换，不能固定用 initiator。
+    const chg = this.currentGame.challenge;
+    const opponent = (playerId === chg.initiator) ? chg.target : chg.initiator;
+    const opponentPlayer = this.players[opponent];
+    if (opponentPlayer && opponentPlayer.skill && opponentPlayer.skill.id === 'axeman') {
       return { success: false, reason: '🪓 对方是斧头帮，不能认输！' };
     }
 
@@ -901,6 +920,8 @@ class Room {
     // 连败追踪
     this.stats[playerId].streak = (this.stats[playerId].streak || 0) + 1;
     this.stats[winner].streak = 0;
+    // v2.6.5：重置输家的连续单骰计数，和其他结算路径对齐
+    this.stats[playerId].singleStreak = 0;
 
     this.phase = PHASE.SETTLING;
 
@@ -1020,6 +1041,8 @@ class Room {
     // 连败追踪
     this.stats[loser].streak = (this.stats[loser].streak || 0) + 1;
     this.stats[winner].streak = 0;
+    // v2.6.5：重置输家连续单骰（与其他路径对齐）
+    this.stats[loser].singleStreak = 0;
 
     this.phase = PHASE.SETTLING;
 
@@ -1072,6 +1095,9 @@ class Room {
    */
   handlePlayAgain(playerId) {
     if (!this.currentGame) return;
+    // v2.6.5：只允许在结算阶段确认"再来一局"，避免 BIDDING 中污染状态
+    if (this.phase !== PHASE.SETTLING) return;
+    if (!this.players[playerId]) return;
     if (!this.currentGame._playAgain) {
       this.currentGame._playAgain = new Set();
     }
@@ -1147,6 +1173,10 @@ class Room {
     this.stats[winner].wins += 1;
     this.stats[timeoutPlayer].losses += 1;
     this.stats[timeoutPlayer].totalScore += score;
+    // v2.6.5：连败追踪 & 重置输家的连续单骰计数，和其他结算路径保持一致
+    this.stats[timeoutPlayer].streak = (this.stats[timeoutPlayer].streak || 0) + 1;
+    this.stats[winner].streak = 0;
+    this.stats[timeoutPlayer].singleStreak = 0;
 
     this.phase = PHASE.SETTLING;
 
@@ -1242,39 +1272,55 @@ class Room {
     if (!this.players[playerId]) return;
     if (this.players[playerId].connected) return; // 已重连
 
-    // 如果在游戏中，判断线方负
-    if (this.phase === PHASE.BIDDING || this.phase === PHASE.CHALLENGING) {
-      // 确定赢家
-      let winner;
-      if (this.phase === PHASE.CHALLENGING) {
-        const challenge = this.currentGame.challenge;
-        winner = (playerId === challenge.initiator) ? challenge.target : challenge.initiator;
-      } else {
-        // 选一个在线的玩家作为赢家
-        winner = this.playerOrder.find(pid => pid !== playerId && this.players[pid].connected);
-      }
-
-      if (!winner) return;
-
-      const multiplier = this.currentGame.challenge ? this.currentGame.challenge.multiplier : 1;
-      const score = multiplier;
-
-      this.currentGame.winner = winner;
-      this.currentGame.loser = playerId;
-      this.currentGame.score = score;
-
-      this.stats[winner].wins += 1;
-      this.stats[playerId].losses += 1;
-      this.stats[playerId].totalScore += score;
-
-      this.clearTurnTimeout();
+    // v2.6.5：结算阶段/等待阶段断线超时，不做任何结算（只把玩家状态留着）
+    if (this.phase !== PHASE.BIDDING && this.phase !== PHASE.CHALLENGING) {
+      return;
     }
 
-    this.phase = PHASE.SETTLING;
+    // 1) 先选赢家（统一一次，供 stats 和 broadcast 共用）
+    let winner;
+    if (this.phase === PHASE.CHALLENGING && this.currentGame.challenge) {
+      const chg = this.currentGame.challenge;
+      const opponent = (playerId === chg.initiator) ? chg.target : chg.initiator;
+      // 对手必须在线
+      if (opponent && this.players[opponent] && this.players[opponent].connected) {
+        winner = opponent;
+      } else {
+        winner = this.playerOrder.find(pid => pid !== playerId && this.players[pid]?.connected);
+      }
+    } else {
+      // BIDDING 阶段：任意一位在线玩家（优先 lastBidder 如果还在线）
+      const lastBidder = this.currentGame?.lastBidder;
+      if (lastBidder && lastBidder !== playerId && this.players[lastBidder]?.connected) {
+        winner = lastBidder;
+      } else {
+        winner = this.playerOrder.find(pid => pid !== playerId && this.players[pid]?.connected);
+      }
+    }
 
-    // 找一个在线的赢家
-    const winner = this.playerOrder.find(pid => pid !== playerId && this.players[pid].connected);
-    if (!winner) return;
+    // 全员都掉线，无人可结算，清理即可
+    if (!winner) {
+      this.clearTurnTimeout();
+      return;
+    }
+
+    // 2) 更新战绩
+    const multiplier = this.currentGame.challenge ? this.currentGame.challenge.multiplier : 1;
+    const score = multiplier;
+
+    this.currentGame.winner = winner;
+    this.currentGame.loser = playerId;
+    this.currentGame.score = score;
+
+    this.stats[winner].wins += 1;
+    this.stats[playerId].losses += 1;
+    this.stats[playerId].totalScore += score;
+    this.stats[playerId].streak = (this.stats[playerId].streak || 0) + 1;
+    this.stats[winner].streak = 0;
+    this.stats[playerId].singleStreak = 0;
+
+    this.clearTurnTimeout();
+    this.phase = PHASE.SETTLING;
 
     this.broadcastSettled({
       type: 'disconnect',
@@ -1284,6 +1330,8 @@ class Room {
       winnerNickname: this.players[winner].nickname,
       loser: playerId,
       loserNickname: this.players[playerId].nickname,
+      multiplier,
+      score,
       message: `${this.players[playerId].nickname} 已掉线`,
       stats: this.stats,
       phase: this.phase,

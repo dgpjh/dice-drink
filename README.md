@@ -174,6 +174,8 @@ pm2 save
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v2.6.5 | 2026-04-27 | **服务端 6 项稳健性修复**（深度自查后）：① **斧头帮反劈判定修正**：`handleSurrender` 原判断发起劈骰方是不是斧头帮，但反劈后 `currentTurn` 会在 initiator/target 间切换，实际应查"当前认输者的对手"是不是斧头帮，否则会出现 A 斧头帮发劈→B 反劈→A 反劈→B 认输，错误放行的情况；② **超时判负缺连败/单骰计数重置**：`handleTurnTimeout` 结算后未更新 `streak` 与 `singleStreak`，导致超时输的人连败/连续单骰数据错乱；③ **断线超时结算双 winner 作用域污染**：`handleDisconnectTimeout` 有两个 `winner` 变量（if 内与 if 外），CHALLENGING 场景下 if 外的 winner 可能取到劈骰之外的第三人，导致 stats 加给 A、广播赢家是 B；同时补充 SETTLING/WAITING 阶段不做结算、全员掉线时不广播的边界；④ **handleBid 防御客户端伪造数据**：`bid=null / "abc"` 直接访问 `bid.value` 会崩，现加 `typeof`、`quantity/value/mode` 合法性校验；⑤ **handlePlayAgain 加 phase 校验**：之前任意阶段都能累积 `_playAgain`，BIDDING 时被恶意打的请求可能直接把计数凑满触发提前 `startGame`，现限制只能在 `SETTLING` 阶段；⑥ **认输/普通结算补 singleStreak 重置**：与连续单骰判负/超时/断线路径对齐，输家的连续单骰计数在每次"真正输"后都清零 |
+| v2.6.4 | 2026-04-27 | **C端体验 9 连修**：① 透视骰子持久化（renderAllOpponentDice 恢复 peekedMap）；② 劈骰等待文案（"B 正在劈 A"）；③ 认输/超时/断线/连摇单骰结算页（noRevealTypes 隐藏骰子区改占位）；④ 封口 pending 徽章（updateSkillBar 渲染 🔒 待触发）；⑤ 重连恢复封口状态（silencerBy/Target + pendingSilencer）；⑥ 再来一局按钮闪烁（playAgainClicked 标记）；⑦ 同名玩家自动加后缀；⑧ 弹幕 lane 占用表替代 lane++；⑨ unlockSound once:true + 房间码输入框实时规范化 |
 | v2.6.3 | 2026-04-24 | **断线重连全面修复 + 封口退款**：① 前端 `handleGameStateRestore` 重连时补读 `data.skillMode` 和 `data.you.skill`，此前断线重连后技能栏消失、自选模式技能模式徽章错乱；② 重连到结算阶段时服务端附带 `lastSettlement` 快照，前端据此渲染完整结算页（胜负/骰子/开骰结果），此前只能看到空白统计页；③ 封口技能激活后若本人当即开骰/劈骰（未走叫数路径），现在会撤销 `used` 标记（封口"退款"），本局还能再用一次 |
 | v2.5.7 | 2026-04-21 | **机器人体验优化**：1) 同房间机器人昵称去重（`server/index.js` 过滤 `existingNames` 时 strip 🤖 前缀，修复 `BotPlayer.getRandomName` 永远失效的 bug，避免"2个同名机器人"）；2) 弹幕发言者仅限机器人（`public/trashTalk.js` 新增 `isBot/pickBotSpeaker`，`fire()` 只在场上机器人中挑 speaker，真人玩家不再"自言自语"；无机器人时静默不发） |
 | v2.5.6 | 2026-04-20 | **弹幕频次下调**：`MIN_INTERVAL` 从 800ms → 1500ms；各事件概率整体下调至约原 50%（myBid 0.25→0.15、otherBid 0.4→0.22、meChallenged 0.7→0.4、otherLose 0.85→0.55、leopard 0.9→0.7 等）；移除 onOtherLose/onLeopard/onSingle/onStreak 的 `force:true`，让节流真正生效。整体约每 2-3 个动作 1 条弹幕，避免刷屏 |
@@ -233,6 +235,8 @@ pm2 save
 | `skill_peeked` | 被透视提示（仅发给被看者）（v2.6） |
 | `skill_choose_progress` | 自选模式：某人选/改技能的进度广播（v2.6.1） |
 | `skill_choose_waiting` | 自选模式：满员但仍有人未选时的等待提示（v2.6.1） |
+
+> **v2.6.5 修复（服务端稳健性）**：① 斧头帮反劈判定从 initiator 改为"当前认输者的对手"；② 超时判负补 streak/singleStreak 重置；③ 断线超时结算统一 winner 选择逻辑，避免 stats/广播不一致；④ handleBid 校验 bid 数据合法性（防御客户端伪造）；⑤ handlePlayAgain 限制在 SETTLING 阶段；⑥ 认输与普通开骰结算补 singleStreak 重置。
 
 > **v2.6.4 修复**：① 透视骰子被重绘刷白（恢复 peekedMap）；② 劈骰等待文案显示"B 正在劈 A"；③ 认输/超时结算页隐藏骰子区改占位文案；④ 封口 pending 徽章常驻；⑤ 重连恢复封口状态（silencerBy/Target/pendingSilencer）；⑥ "再来一局"按钮闪烁；⑦ 同名玩家自动加后缀；⑧ 弹幕 lane 占用表防覆盖；⑨ unlockSound once:true + 房间码输入框实时规范化。
 
