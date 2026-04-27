@@ -2,7 +2,7 @@
 
 > 经典酒桌游戏线上版！支持 2-4 人在线对战，摇骰子、叫数、开骰，输了就得喝 🍺
 
-**当前版本：v2.6.4**
+**当前版本：v2.6.6**
 
 ---
 
@@ -174,6 +174,7 @@ pm2 save
 
 | 版本 | 日期 | 变更内容 |
 |------|------|---------|
+| v2.6.6 | 2026-04-27 | **UI 遮挡 6 项修复**（用户反复反馈）：① **规则 📖 按钮挪位**：从 `top:110px right:10px` 移到 `bottom:60px right:8px`，缩小到 32px + 半透明 + backdrop-filter，彻底不再遮挡第二个对手卡片的「🍺 欠杯：X」分数；② **弹幕容器限高**：从 `top:80px height:200px`（覆盖整个对手区+叫骰记录区）压到 `top:4px height:76px`（仅顶部 2 条 lane），同时 `z-index 50→40` 让位给规则按钮；前端 `showDanmaku` 同步把 `maxLanes` 改为读容器实际高度，避免硬编码 200 失配；③ **弹幕单条限宽**：`max-width:70% + ellipsis`，避免长昵称+长聊天在 360 屏飞出可视区；④ **player-header 长昵称溢出**：加 `gap:8px / min-width:0`，name 加 `flex:1 + ellipsis`，score 加 `flex:0 0 auto + nowrap`，8 字昵称 + 3 位欠杯不再换行/挤出布局；⑤ **bid-item 长昵称溢出**：`.bid-player` 加 ellipsis，`.bid-content` 加 `word-break:break-word`；⑥ **toast 多行 + 提层级**：加 `white-space:pre-line` 让规则预设说明 `\n` 真正换行展示，`z-index 2000→3500` 让断线遮罩中也能看到提示 |
 | v2.6.5 | 2026-04-27 | **服务端 6 项稳健性修复**（深度自查后）：① **斧头帮反劈判定修正**：`handleSurrender` 原判断发起劈骰方是不是斧头帮，但反劈后 `currentTurn` 会在 initiator/target 间切换，实际应查"当前认输者的对手"是不是斧头帮，否则会出现 A 斧头帮发劈→B 反劈→A 反劈→B 认输，错误放行的情况；② **超时判负缺连败/单骰计数重置**：`handleTurnTimeout` 结算后未更新 `streak` 与 `singleStreak`，导致超时输的人连败/连续单骰数据错乱；③ **断线超时结算双 winner 作用域污染**：`handleDisconnectTimeout` 有两个 `winner` 变量（if 内与 if 外），CHALLENGING 场景下 if 外的 winner 可能取到劈骰之外的第三人，导致 stats 加给 A、广播赢家是 B；同时补充 SETTLING/WAITING 阶段不做结算、全员掉线时不广播的边界；④ **handleBid 防御客户端伪造数据**：`bid=null / "abc"` 直接访问 `bid.value` 会崩，现加 `typeof`、`quantity/value/mode` 合法性校验；⑤ **handlePlayAgain 加 phase 校验**：之前任意阶段都能累积 `_playAgain`，BIDDING 时被恶意打的请求可能直接把计数凑满触发提前 `startGame`，现限制只能在 `SETTLING` 阶段；⑥ **认输/普通结算补 singleStreak 重置**：与连续单骰判负/超时/断线路径对齐，输家的连续单骰计数在每次"真正输"后都清零 |
 | v2.6.4 | 2026-04-27 | **C端体验 9 连修**：① 透视骰子持久化（renderAllOpponentDice 恢复 peekedMap）；② 劈骰等待文案（"B 正在劈 A"）；③ 认输/超时/断线/连摇单骰结算页（noRevealTypes 隐藏骰子区改占位）；④ 封口 pending 徽章（updateSkillBar 渲染 🔒 待触发）；⑤ 重连恢复封口状态（silencerBy/Target + pendingSilencer）；⑥ 再来一局按钮闪烁（playAgainClicked 标记）；⑦ 同名玩家自动加后缀；⑧ 弹幕 lane 占用表替代 lane++；⑨ unlockSound once:true + 房间码输入框实时规范化 |
 | v2.6.3 | 2026-04-24 | **断线重连全面修复 + 封口退款**：① 前端 `handleGameStateRestore` 重连时补读 `data.skillMode` 和 `data.you.skill`，此前断线重连后技能栏消失、自选模式技能模式徽章错乱；② 重连到结算阶段时服务端附带 `lastSettlement` 快照，前端据此渲染完整结算页（胜负/骰子/开骰结果），此前只能看到空白统计页；③ 封口技能激活后若本人当即开骰/劈骰（未走叫数路径），现在会撤销 `used` 标记（封口"退款"），本局还能再用一次 |

@@ -480,11 +480,18 @@ html, body {
   justify-content: space-between;
   align-items: center;
   padding: 4px 0;
+  gap: 8px;
+  min-width: 0;
 }
 
 .player-header .player-name {
   font-size: 15px;
   font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .player-score {
@@ -493,6 +500,8 @@ html, body {
   background: var(--bg-card);
   padding: 4px 10px;
   border-radius: 20px;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* 骰子 */
@@ -629,11 +638,15 @@ html, body {
   font-weight: 600;
   font-size: 12px;
   color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bid-item .bid-content {
   font-weight: 700;
   margin-top: 2px;
+  word-break: break-word;
 }
 
 /* 飞/斋模式标签颜色 */
@@ -1085,10 +1098,12 @@ html, body {
   font-weight: 600;
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
-  z-index: 2000;
+  z-index: 3500;          /* v2.6.6：高于 overlay(3000)，断线时也能看到提示 */
   transition: transform 0.3s ease;
   max-width: 90%;
   text-align: center;
+  white-space: pre-line;  /* v2.6.6：支持 \n 换行（多行预设说明） */
+  line-height: 1.5;
 }
 
 .toast.show {
@@ -1150,29 +1165,37 @@ html, body {
 
 
 
-/* =============== 规则吸边按钮 =============== */
+/* =============== 规则吸边按钮（v2.6.6：移到右下角，不再遮挡对手分数） =============== */
 .rules-float-btn {
   position: absolute;
-  top: 110px;
-  right: 10px;
-  width: 38px;
-  height: 38px;
+  bottom: 60px;          /* 聊天栏上方 */
+  right: 8px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  border: 2px solid var(--border);
-  background: var(--bg-card);
-  font-size: 18px;
+  border: 1px solid var(--border);
+  background: rgba(21, 16, 42, 0.78);
+  backdrop-filter: blur(6px);
+  font-size: 15px;
   cursor: pointer;
-  z-index: 100;
+  z-index: 80;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  opacity: 0.72;
   transition: all 0.2s;
+}
+
+.rules-float-btn:hover {
+  opacity: 1;
+  border-color: var(--primary-light);
 }
 
 .rules-float-btn:active {
   transform: scale(0.9);
   background: var(--bg-card-hover);
+  opacity: 1;
 }
 
 /* 规则速查弹窗 */
@@ -1272,28 +1295,31 @@ html, body {
   flex-shrink: 0;
 }
 
-/* =============== 弹幕 =============== */
+/* =============== 弹幕（v2.6.6：限高一窄条，避免遮挡分数/骰子/操作区） =============== */
 .danmaku-container {
   position: absolute;
-  top: 80px;
+  top: 4px;
   left: 0;
   right: 0;
-  height: 200px;
+  height: 76px;          /* 仅顶部 2 条 lane，避开下方所有信息 */
   pointer-events: none;
   overflow: hidden;
-  z-index: 50;
+  z-index: 40;
 }
 
 .danmaku-item {
   position: absolute;
   white-space: nowrap;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   text-shadow: 0 1px 3px rgba(0,0,0,0.7), 0 0 8px rgba(0,0,0,0.3);
   animation: danmakuMove 12s linear forwards;
-  padding: 4px 12px;
-  border-radius: 14px;
+  padding: 3px 10px;
+  border-radius: 12px;
   pointer-events: none;
+  max-width: 70%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .danmaku-item.mine {

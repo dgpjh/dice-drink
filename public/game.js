@@ -2191,8 +2191,10 @@ function showDanmaku(data) {
   item.className = `danmaku-item ${isMine ? 'mine' : 'theirs'}`;
   item.textContent = `${data.nickname}: ${data.text}`;
 
-  const laneHeight = 36;
-  const maxLanes = Math.floor(200 / laneHeight);
+  const laneHeight = 32;
+  // v2.6.6：根据容器实际高度计算 lane 数（容器高度从 200 缩到 76）
+  const containerH = container.clientHeight || 76;
+  const maxLanes = Math.max(1, Math.floor(containerH / laneHeight));
   // 找第一个空闲 lane；若全满则随机选一个（降级避免丢弹幕）
   let lane = -1;
   for (let i = 0; i < maxLanes; i++) {
