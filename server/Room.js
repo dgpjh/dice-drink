@@ -17,7 +17,7 @@ const PHASE = {
 };
 
 class Room {
-  constructor(roomCode, hostPlayerId, maxPlayers = 2, ruleSet = null, skillMode = 'none') {
+  constructor(roomCode, hostPlayerId, maxPlayers = 2, ruleSet = null, skillMode = 'none', matchConfig = null) {
     this.roomCode = roomCode;
     this.createdAt = Date.now();
     this.phase = PHASE.WAITING;
@@ -28,6 +28,20 @@ class Room {
 
     // 技能模式：'none'（无技能）/ 'random'（随机发）/ 'choose'（自选）
     this.skillMode = skillMode || 'none';
+
+    // v2.7.0：赛制模式（不选 = 'free' 自由模式，无终结条件）
+    // mode: 'free' | 'time' | 'rounds' | 'maxLoss' | 'totalLoss'
+    // target: time(分钟2-10) | rounds(局数3-20) | maxLoss(杯数3-30) | totalLoss(杯数3-100)
+    this.matchConfig = this._normalizeMatchConfig(matchConfig);
+    this.matchState = {
+      startedAt: null,           // 第一局开始时间
+      roundsPlayed: 0,           // 已完成局数
+      timeUpFlag: false,         // 定时间模式：时间到的标记
+      finished: false,           // 整场已结束
+      finishReason: null,        // 'time'/'rounds'/'maxLoss'/'totalLoss'
+      finalRanking: null         // 最终排名快照
+    };
+    this.matchTimer = null;      // 定时间模式的总倒计时
 
     // 玩家
     this.players = {};  // { playerId: { id, nickname, ws, dice, connected, disconnectedAt } }
@@ -49,6 +63,220 @@ class Room {
 
     // 房间10分钟超时
     this.startRoomTimeout();
+  }
+
+  // =============== 赛制（v2.7.0） ===============
+
+  /**
+   * 规范化赛制配置
+   * @param {object} cfg - { mode, target }
+   * @returns {object} { mode, target, label }
+   */
+  _normalizeMatchConfig(cfg) {
+    const def = { mode: 'free', target: 0, label: '自由模式' };
+    if (!cfg || typeof cfg !== 'object') return def;
+    const mode = cfg.mode;
+    const target = parseInt(cfg.target, 10);
+
+    switch (mode) {
+      case 'time': {
+        // 2~10 分钟
+        const t = Math.min(Math.max(Number.isFinite(target) ? target : 5, 2), 10);
+        return { mode: 'time', target: t, label: `定时间 ${t} 分钟` };
+      }
+      case 'rounds': {
+        const t = Math.min(Math.max(Number.isFinite(target) ? target : 5, 3), 20);
+        return { mode: 'rounds', target: t, label: `定局数 ${t} 局` };
+      }
+      case 'maxLoss': {
+        const t = Math.min(Math.max(Number.isFinite(target) ? target : 10, 3), 30);
+        return { mode: 'maxLoss', target: t, label: `找菜比 ${t} 杯封顶` };
+      }
+      case 'totalLoss': {
+        const t = Math.min(Math.max(Number.isFinite(target) ? target : 30, 3), 100);
+        return { mode: 'totalLoss', target: t, label: `定总杯数 ${t} 杯封顶` };
+      }
+      default:
+        return def;
+    }
+  }
+
+  /**
+   * 启动赛制（在第一局 startGame 时调用一次）
+   */
+  _startMatchIfNeeded() {
+    if (this.matchConfig.mode === 'free') return;
+    if (this.matchState.startedAt) return; // 已启动
+    this.matchState.startedAt = Date.now();
+
+    // 定时间模式：启动总倒计时
+    if (this.matchConfig.mode === 'time') {
+      const ms = this.matchConfig.target * 60 * 1000;
+      this.matchTimer = setTimeout(() => {
+        this.matchState.timeUpFlag = true;
+        // 时间到时正在游戏中：当前局结束后会在 _checkMatchEnd 触发结束
+        // 时间到时正在结算页/等待页：直接结束
+        if (this.phase === PHASE.SETTLING || this.phase === PHASE.WAITING) {
+          this._finishMatch('time');
+        } else {
+          // 通知前端"时间已到，本局结束后整场结束"
+          this.broadcast('match_time_up', {
+            message: '⏱ 比赛时间已到，本局结束后将公布最终排名'
+          });
+        }
+      }, ms);
+
+      // 同步广播开始时间，前端做倒计时
+      this.broadcast('match_started', {
+        matchConfig: this.matchConfig,
+        startedAt: this.matchState.startedAt,
+        endsAt: this.matchState.startedAt + ms
+      });
+    } else {
+      this.broadcast('match_started', {
+        matchConfig: this.matchConfig,
+        startedAt: this.matchState.startedAt
+      });
+    }
+  }
+
+  /**
+   * 每次 broadcastSettled 后调用，检查是否触发整场结束
+   */
+  _checkMatchEnd() {
+    if (this.matchConfig.mode === 'free') return false;
+    if (this.matchState.finished) return false;
+
+    this.matchState.roundsPlayed += 1;
+
+    let shouldEnd = false;
+    let reason = null;
+
+    switch (this.matchConfig.mode) {
+      case 'time':
+        if (this.matchState.timeUpFlag) {
+          shouldEnd = true;
+          reason = 'time';
+        }
+        break;
+      case 'rounds':
+        if (this.matchState.roundsPlayed >= this.matchConfig.target) {
+          shouldEnd = true;
+          reason = 'rounds';
+        }
+        break;
+      case 'maxLoss': {
+        const maxLoss = Math.max(...Object.values(this.stats).map(s => s.totalScore || 0));
+        if (maxLoss >= this.matchConfig.target) {
+          shouldEnd = true;
+          reason = 'maxLoss';
+        }
+        break;
+      }
+      case 'totalLoss': {
+        const totalLoss = Object.values(this.stats).reduce((sum, s) => sum + (s.totalScore || 0), 0);
+        if (totalLoss >= this.matchConfig.target) {
+          shouldEnd = true;
+          reason = 'totalLoss';
+        }
+        break;
+      }
+    }
+
+    // 广播每局后的赛制进度（无论是否结束）
+    this.broadcast('match_progress', this._getMatchProgress());
+
+    if (shouldEnd) {
+      // 延迟一点点让结算页先展示
+      setTimeout(() => this._finishMatch(reason), 1500);
+    }
+    return shouldEnd;
+  }
+
+  /**
+   * 结束整场比赛，下发最终排名
+   */
+  _finishMatch(reason) {
+    if (this.matchState.finished) return;
+    this.matchState.finished = true;
+    this.matchState.finishReason = reason;
+
+    // 清理定时器
+    if (this.matchTimer) {
+      clearTimeout(this.matchTimer);
+      this.matchTimer = null;
+    }
+    this.clearTurnTimeout();
+
+    // 计算排名：按 totalScore 升序（输得少的排前面），并列同名次
+    const ranking = this.playerOrder.map(pid => {
+      const s = this.stats[pid] || { wins: 0, losses: 0, totalScore: 0 };
+      return {
+        playerId: pid,
+        nickname: this.players[pid]?.nickname || '???',
+        totalScore: s.totalScore || 0,
+        wins: s.wins || 0,
+        losses: s.losses || 0,
+        isBot: !!this.players[pid]?.isBot
+      };
+    });
+    ranking.sort((a, b) => a.totalScore - b.totalScore);
+    // 标记名次（同分并列）
+    let lastScore = -1, lastRank = 0;
+    ranking.forEach((r, i) => {
+      if (r.totalScore !== lastScore) {
+        lastRank = i + 1;
+        lastScore = r.totalScore;
+      }
+      r.rank = lastRank;
+    });
+
+    this.matchState.finalRanking = ranking;
+    this.phase = PHASE.FINISHED;
+
+    this.broadcast('match_finished', {
+      matchConfig: this.matchConfig,
+      reason,
+      reasonText: this._getFinishReasonText(reason),
+      ranking,
+      roundsPlayed: this.matchState.roundsPlayed,
+      durationMs: Date.now() - (this.matchState.startedAt || Date.now())
+    });
+  }
+
+  _getFinishReasonText(reason) {
+    switch (reason) {
+      case 'time': return `比赛时长 ${this.matchConfig.target} 分钟已到`;
+      case 'rounds': return `已完成 ${this.matchConfig.target} 局`;
+      case 'maxLoss': return `有玩家欠杯达到 ${this.matchConfig.target} 杯`;
+      case 'totalLoss': return `总欠杯数达到 ${this.matchConfig.target} 杯`;
+      default: return '比赛结束';
+    }
+  }
+
+  /**
+   * 获取赛制进度（用于广播 + 重连状态）
+   */
+  _getMatchProgress() {
+    const cfg = this.matchConfig;
+    const st = this.matchState;
+    const progress = {
+      mode: cfg.mode,
+      target: cfg.target,
+      label: cfg.label,
+      roundsPlayed: st.roundsPlayed,
+      finished: st.finished
+    };
+    if (cfg.mode === 'time' && st.startedAt) {
+      progress.startedAt = st.startedAt;
+      progress.endsAt = st.startedAt + cfg.target * 60 * 1000;
+      progress.timeUpFlag = st.timeUpFlag;
+    } else if (cfg.mode === 'maxLoss') {
+      progress.currentMax = Math.max(0, ...Object.values(this.stats).map(s => s.totalScore || 0));
+    } else if (cfg.mode === 'totalLoss') {
+      progress.currentTotal = Object.values(this.stats).reduce((sum, s) => sum + (s.totalScore || 0), 0);
+    }
+    return progress;
   }
 
   // =============== 房间管理 ===============
@@ -225,6 +453,7 @@ class Room {
         maxPlayers: this.maxPlayers,
         ruleSet: this.ruleSet,
         skillMode: this.skillMode,
+        matchConfig: this.matchConfig,
         stats: this.stats
       });
     }
@@ -264,6 +493,9 @@ class Room {
   startGame() {
     if (this.playerOrder.length < 2) return;
 
+    // v2.7.0：整场已结束，禁止再开新局
+    if (this.matchState.finished) return;
+
     // 自选模式下，所有玩家都必须已选技能才能开局
     if (this.skillMode === 'choose' && !this.allHumansChoseSkill()) {
       // 广播一条提示，等所有人选完后再由 chooseSkill 尝试触发 startGame
@@ -285,6 +517,9 @@ class Room {
 
     // 开新局清理上一局结算快照
     this.lastSettlement = null;
+
+    // v2.7.0：第一局开始时启动赛制（含定时间倒计时）
+    this._startMatchIfNeeded();
 
     // 每一局开始重置主动技能使用次数 + 封口激活状态
     for (const pid of this.playerOrder) {
@@ -644,10 +879,17 @@ class Room {
 
   /**
    * 广播 game_settled 并保存快照（用于断线重连）
+   * v2.7.0：结算后检查赛制结束条件
    */
   broadcastSettled(payload) {
+    // v2.7.0：附带赛制进度（前端实时更新顶部进度条）
+    if (this.matchConfig.mode !== 'free') {
+      payload.matchProgress = this._getMatchProgress();
+    }
     this.lastSettlement = payload;
     this.broadcast('game_settled', payload);
+    // 检查整场是否结束（异步发 match_finished）
+    this._checkMatchEnd();
   }
 
   /**
@@ -1097,6 +1339,8 @@ class Room {
     if (!this.currentGame) return;
     // v2.6.5：只允许在结算阶段确认"再来一局"，避免 BIDDING 中污染状态
     if (this.phase !== PHASE.SETTLING) return;
+    // v2.7.0：整场比赛已结束，不能再来一局
+    if (this.matchState.finished) return;
     if (!this.players[playerId]) return;
     if (!this.currentGame._playAgain) {
       this.currentGame._playAgain = new Set();
@@ -1407,6 +1651,21 @@ class Room {
       state.lastSettlement = this.lastSettlement;
     }
 
+    // v2.7.0：附带赛制配置 + 进度（前端重连恢复顶部进度条/最终排名）
+    state.matchConfig = this.matchConfig;
+    if (this.matchConfig.mode !== 'free') {
+      state.matchProgress = this._getMatchProgress();
+    }
+    if (this.matchState.finished && this.matchState.finalRanking) {
+      state.matchFinished = {
+        reason: this.matchState.finishReason,
+        reasonText: this._getFinishReasonText(this.matchState.finishReason),
+        ranking: this.matchState.finalRanking,
+        roundsPlayed: this.matchState.roundsPlayed,
+        durationMs: Date.now() - (this.matchState.startedAt || Date.now())
+      };
+    }
+
     this.sendTo(playerId, 'game_state', state);
   }
 
@@ -1433,6 +1692,10 @@ class Room {
   cleanup() {
     this.clearRoomTimeout();
     this.clearTurnTimeout();
+    if (this.matchTimer) {
+      clearTimeout(this.matchTimer);
+      this.matchTimer = null;
+    }
     for (const timer of Object.values(this.disconnectTimers)) {
       clearTimeout(timer);
     }
@@ -1450,6 +1713,7 @@ class Room {
       maxPlayers: this.maxPlayers,
       ruleSet: this.ruleSet,
       skillMode: this.skillMode,
+      matchConfig: this.matchConfig,
       players: this.playerOrder.map(pid => ({
         id: pid,
         nickname: this.players[pid].nickname,

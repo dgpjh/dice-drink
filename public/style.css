@@ -1859,6 +1859,302 @@ html, body {
   text-align: center;
 }
 
+/* =============== v2.7.0 赛制模式选择器 =============== */
+.match-mode-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mm-btn {
+  padding: 10px 6px;
+  border: 2px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  transition: all 0.2s;
+}
+
+.mm-btn .mm-name {
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.mm-btn .mm-short {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.mm-btn.active {
+  background: rgba(255, 165, 0, 0.18);
+  border-color: #ffa500;
+  color: #ffa500;
+}
+
+.mm-btn.active .mm-short {
+  color: #ffa500cc;
+}
+
+.match-mode-target {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.target-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: center;
+}
+
+.target-row label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  min-width: 40px;
+}
+
+.match-target-selector {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 2px;
+  border: 1px solid var(--border);
+}
+
+.match-target-selector .sel-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 18px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.match-target-selector .sel-btn:active {
+  background: var(--bg-card-hover);
+}
+
+.match-target-selector .sel-value {
+  min-width: 40px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffa500;
+}
+
+.target-unit {
+  font-size: 13px;
+  color: var(--text-secondary);
+  min-width: 32px;
+}
+
+.match-mode-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 4px;
+  line-height: 1.5;
+}
+
+/* =============== v2.7.0 游戏页顶部赛制进度条 =============== */
+.match-progress-bar {
+  position: absolute;
+  top: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 165, 0, 0.18);
+  border: 1px solid rgba(255, 165, 0, 0.5);
+  color: #ffa500;
+  padding: 4px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  backdrop-filter: blur(4px);
+  white-space: nowrap;
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.match-progress-bar.urgent {
+  background: rgba(255, 60, 60, 0.2);
+  border-color: rgba(255, 60, 60, 0.6);
+  color: #ff5555;
+  animation: matchPulse 1.2s infinite;
+}
+
+@keyframes matchPulse {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.06); }
+}
+
+/* =============== v2.7.0 最终排名页 =============== */
+.final-ranking-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 16px;
+  max-width: 480px;
+  margin: 0 auto;
+  width: 100%;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.final-trophy {
+  font-size: 72px;
+  animation: trophyBounce 1.8s ease-in-out infinite;
+  filter: drop-shadow(0 0 20px rgba(255, 215, 0, 0.6));
+}
+
+@keyframes trophyBounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-8px) scale(1.05); }
+}
+
+.final-title {
+  font-size: 26px;
+  margin: 12px 0 6px;
+  background: linear-gradient(135deg, #ffd700, #ffa500);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.final-reason {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.final-meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 22px;
+}
+
+.final-ranking-list {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.rank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  transition: all 0.2s;
+}
+
+.rank-row.rank-1 {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.18), rgba(255, 165, 0, 0.08));
+  border-color: rgba(255, 215, 0, 0.6);
+  box-shadow: 0 4px 14px rgba(255, 215, 0, 0.15);
+}
+
+.rank-row.rank-2 {
+  background: linear-gradient(135deg, rgba(192, 192, 192, 0.16), rgba(150, 150, 150, 0.06));
+  border-color: rgba(192, 192, 192, 0.5);
+}
+
+.rank-row.rank-3 {
+  background: linear-gradient(135deg, rgba(205, 127, 50, 0.16), rgba(165, 100, 40, 0.06));
+  border-color: rgba(205, 127, 50, 0.5);
+}
+
+.rank-row.rank-last {
+  background: rgba(255, 60, 60, 0.08);
+  border-color: rgba(255, 60, 60, 0.3);
+}
+
+.rank-row.is-me {
+  outline: 2px solid var(--primary-light);
+  outline-offset: -2px;
+}
+
+.rank-medal {
+  font-size: 28px;
+  width: 40px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.rank-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.rank-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-stats {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.rank-score {
+  font-size: 22px;
+  font-weight: 800;
+  color: #ffa500;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1;
+}
+
+.rank-score .rank-score-unit {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: 3px;
+}
+
+.rank-row.rank-1 .rank-score {
+  color: #ffd700;
+}
+
+.rank-row.rank-last .rank-score {
+  color: #ff5555;
+}
+
+.final-buttons {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 /* =============== 等待房间 - 技能自选面板 =============== */
 .skill-choose-panel {
   width: 100%;

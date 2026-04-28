@@ -408,9 +408,13 @@ wss.on('connection', (ws) => {
         const presetId = data.preset || 'classic';
         const singleBehavior = data.singleBehavior || 'zero';
         const skillMode = ['none', 'random', 'choose'].includes(data.skillMode) ? data.skillMode : 'none';
+        // v2.7.0：赛制配置
+        const matchConfig = data.matchConfig && typeof data.matchConfig === 'object'
+          ? { mode: data.matchConfig.mode, target: data.matchConfig.target }
+          : null;
         const ruleSet = createRuleSet(presetId, singleBehavior);
         const roomCode = generateRoomCode();
-        const room = new Room(roomCode, playerId, maxPlayers, ruleSet, skillMode);
+        const room = new Room(roomCode, playerId, maxPlayers, ruleSet, skillMode, matchConfig);
         rooms[roomCode] = room;
         room.addPlayer(playerId, nickname, ws);
         playerRooms[playerId] = roomCode;
@@ -425,10 +429,11 @@ wss.on('connection', (ws) => {
             maxPlayers,
             ruleSet,
             skillMode,
+            matchConfig: room.matchConfig,
             roomInfo: room.getRoomInfo()
           }
         }));
-        console.log(`[Room] ${nickname} 创建房间 ${roomCode}（${maxPlayers}人, ${ruleSet.presetName}, 单骰:${ruleSet.singleBehaviorName}, 技能模式:${skillMode}）`);
+        console.log(`[Room] ${nickname} 创建房间 ${roomCode}（${maxPlayers}人, ${ruleSet.presetName}, 单骰:${ruleSet.singleBehaviorName}, 技能:${skillMode}, 赛制:${room.matchConfig.label}）`);
         break;
       }
 

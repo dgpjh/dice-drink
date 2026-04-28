@@ -55,7 +55,7 @@
         </div>
         <div class="version-info">
           <button id="btn-sound-toggle" class="sound-toggle" title="音效开关">🔊</button>
-          <span>v2.6.6</span>
+          <span>v2.7.0</span>
         </div>
       </div>
     </div>
@@ -123,6 +123,46 @@
           </div>
           <div class="skill-mode-detail" id="skill-mode-detail">
             不使用技能，原汁原味
+          </div>
+        </div>
+
+        <div class="create-section">
+          <div class="section-label">赛制模式 <span class="section-tip" title="不选=自由模式，可以一直玩下去">?</span></div>
+          <div class="match-mode-selector" id="match-mode-selector">
+            <button class="mm-btn active" data-mode="free">
+              <span class="mm-name">自由</span>
+              <span class="mm-short">想玩多久玩多久</span>
+            </button>
+            <button class="mm-btn" data-mode="time">
+              <span class="mm-name">⏱ 定时间</span>
+              <span class="mm-short">2-10 分钟</span>
+            </button>
+            <button class="mm-btn" data-mode="rounds">
+              <span class="mm-name">🔢 定局数</span>
+              <span class="mm-short">3-20 局</span>
+            </button>
+            <button class="mm-btn" data-mode="maxLoss">
+              <span class="mm-name">🎯 找菜比</span>
+              <span class="mm-short">3-30 杯封顶</span>
+            </button>
+            <button class="mm-btn" data-mode="totalLoss">
+              <span class="mm-name">🍺 定总杯</span>
+              <span class="mm-short">3-100 杯封顶</span>
+            </button>
+          </div>
+          <div class="match-mode-target" id="match-mode-target" style="display:none;">
+            <div class="target-row">
+              <label id="match-target-label">数值</label>
+              <div class="number-selector match-target-selector">
+                <button class="sel-btn" data-dir="down">−</button>
+                <span class="sel-value" id="match-target-value">5</span>
+                <button class="sel-btn" data-dir="up">+</button>
+              </div>
+              <span class="target-unit" id="match-target-unit">分钟</span>
+            </div>
+          </div>
+          <div class="match-mode-detail" id="match-mode-detail">
+            自由模式：不限时间和局数，每局结束可"再来一局"
           </div>
         </div>
 
@@ -209,6 +249,12 @@
       <div class="game-container">
         <!-- 规则吸边按钮 -->
         <button class="rules-float-btn" id="btn-rules-float" title="规则速查">📖</button>
+
+        <!-- v2.7.0：赛制进度条（自由模式不显示） -->
+        <div class="match-progress-bar" id="match-progress-bar" style="display:none;">
+          <span class="mp-icon" id="mp-icon">🏁</span>
+          <span class="mp-text" id="mp-text"></span>
+        </div>
 
         <!-- 其他玩家骰子区域（动态生成） -->
         <div class="opponents-area" id="opponents-area">
@@ -343,6 +389,24 @@
         <div class="settlement-buttons">
           <button class="btn btn-primary btn-lg" id="btn-play-again">速进！再整一局</button>
           <button class="btn btn-ghost" id="btn-leave-game">溜了溜了</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- v2.7.0：最终排名页（赛制结束时显示） -->
+    <div id="page-final-ranking" class="page">
+      <div class="final-ranking-container">
+        <div class="final-trophy">🏆</div>
+        <h2 class="final-title">比赛结束！</h2>
+        <div class="final-reason" id="final-reason">—</div>
+        <div class="final-meta" id="final-meta">—</div>
+
+        <div class="final-ranking-list" id="final-ranking-list">
+          <!-- 动态填充 -->
+        </div>
+
+        <div class="final-buttons">
+          <button class="btn btn-primary btn-lg" id="btn-final-back-home">回到首页</button>
         </div>
       </div>
     </div>

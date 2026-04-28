@@ -62,7 +62,15 @@ const state = {
 
   // 等房间计时
   roomTimerInterval: null,
-  roomCreatedAt: null
+  roomCreatedAt: null,
+
+  // v2.7.0：赛制系统
+  matchConfig: null,                // 当前房间赛制配置 { mode, target, label }
+  selectedMatchMode: 'free',        // 创房选中模式 free/time/rounds/maxLoss/totalLoss
+  selectedMatchTarget: 5,           // 创房选中数值
+  matchProgress: null,              // 实时进度 { roundsPlayed, maxLoss, totalLoss, timeLeftSec }
+  matchCountdownTimer: null,        // 定时间倒计时定时器
+  matchFinished: null               // 最终排名快照 { reason, ranking, rounds, ... }
 };
 
 // 暴露给 trashTalk.js 使用
@@ -187,6 +195,8 @@ function handleMessage(msg) {
       if (data.ruleSet) state.ruleSet = data.ruleSet;
       if (data.skillMode) state.skillMode = data.skillMode;
       if (data.roomInfo?.skillMode) state.skillMode = data.roomInfo.skillMode;
+      if (data.matchConfig) state.matchConfig = data.matchConfig;
+      if (data.roomInfo?.matchConfig) state.matchConfig = data.roomInfo.matchConfig;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -198,6 +208,7 @@ function handleMessage(msg) {
       state.maxPlayers = data.roomInfo?.maxPlayers || 2;
       if (data.roomInfo?.ruleSet) state.ruleSet = data.roomInfo.ruleSet;
       if (data.roomInfo?.skillMode) state.skillMode = data.roomInfo.skillMode;
+      if (data.roomInfo?.matchConfig) state.matchConfig = data.roomInfo.matchConfig;
       localStorage.setItem('liars_dice_player_id', data.playerId);
       showWaitingPage(data);
       break;
@@ -207,6 +218,7 @@ function handleMessage(msg) {
       state.stats = data.stats;
       if (data.ruleSet) state.ruleSet = data.ruleSet;
       if (data.skillMode) state.skillMode = data.skillMode;
+      if (data.matchConfig) state.matchConfig = data.matchConfig;
       if (data.you && data.you.skill !== undefined) state.mySkill = data.you.skill;
       if (data.playerOrder) {
         state.playerOrder = data.playerOrder;
@@ -469,6 +481,44 @@ function handleMessage(msg) {
     case 'skill_choose_waiting':
       handleSkillChooseWaiting(data);
       break;
+
+    // ============== v2.7.0：赛制系统 ==============
+    case 'match_started':
+      if (data.matchConfig) state.matchConfig = data.matchConfig;
+      state.matchProgress = {
+        mode: data.matchConfig?.mode,
+        target: data.matchConfig?.target,
+        label: data.matchConfig?.label,
+        startedAt: data.startedAt,
+        endsAt: data.endsAt,
+        roundsPlayed: 0,
+        finished: false
+      };
+      startMatchCountdownIfNeeded();
+      updateMatchProgressBar();
+      if (data.matchConfig?.label) {
+        showToast(`🏁 赛制启动：${data.matchConfig.label}`, 'success');
+      }
+      break;
+
+    case 'match_progress':
+      state.matchProgress = data;
+      updateMatchProgressBar();
+      break;
+
+    case 'match_time_up':
+      if (state.matchProgress) state.matchProgress.timeUpFlag = true;
+      stopMatchCountdown();
+      updateMatchProgressBar();
+      showToast(data.message || '⏱ 比赛时间已到，本局结束后公布排名', 'success');
+      break;
+
+    case 'match_finished':
+      stopMatchCountdown();
+      state.matchFinished = data;
+      if (state.matchProgress) state.matchProgress.finished = true;
+      showFinalRankingPage(data);
+      break;
   }
 }
 
@@ -546,6 +596,7 @@ document.getElementById('btn-create-room').addEventListener('click', async () =>
   renderPresetSelector();
   renderSingleBehaviorSelector();
   renderSkillModeSelector();
+  renderMatchModeSelector();
 
   showModal('modal-create');
 });
@@ -663,6 +714,79 @@ function renderSkillModeSelector() {
   };
 }
 
+// =============== v2.7.0：赛制模式选择器（创房） ===============
+const MATCH_MODE_META = {
+  free:      { unit: '',     label: '',         min: 0,  max: 0,   def: 0,  desc: '自由模式：不限时间和局数，每局结束可"再来一局"' },
+  time:      { unit: '分钟', label: '游戏时长', min: 2,  max: 10,  def: 5,  desc: '⏱ 定时间：到时间后当前局结束后整把游戏结束' },
+  rounds:    { unit: '局',   label: '总局数',   min: 3,  max: 20,  def: 5,  desc: '🔢 定局数：打满预定局数后整把结束' },
+  maxLoss:   { unit: '杯',   label: '封顶杯数', min: 3,  max: 30,  def: 10, desc: '🎯 找菜比：任一玩家欠杯达到上限即结束（最菜的人喝爆）' },
+  totalLoss: { unit: '杯',   label: '总杯上限', min: 3,  max: 100, def: 20, desc: '🍺 定总杯：所有玩家欠杯总和达到上限即结束' }
+};
+
+function renderMatchModeSelector() {
+  const container = document.getElementById('match-mode-selector');
+  const targetWrap = document.getElementById('match-mode-target');
+  const labelEl = document.getElementById('match-target-label');
+  const valueEl = document.getElementById('match-target-value');
+  const unitEl = document.getElementById('match-target-unit');
+  const detail = document.getElementById('match-mode-detail');
+  if (!container) return;
+
+  // 初始化 UI
+  container.querySelectorAll('.mm-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === state.selectedMatchMode);
+  });
+  syncMatchTargetUI();
+
+  container.onclick = (e) => {
+    const btn = e.target.closest('.mm-btn');
+    if (!btn) return;
+    state.selectedMatchMode = btn.dataset.mode;
+    // 切换模式时把 target 重置成该模式默认值
+    const meta = MATCH_MODE_META[state.selectedMatchMode];
+    if (meta) state.selectedMatchTarget = meta.def;
+    container.querySelectorAll('.mm-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    syncMatchTargetUI();
+  };
+
+  // 数值选择器（只在该选择器内部触发）
+  if (targetWrap) {
+    targetWrap.onclick = (e) => {
+      const btn = e.target.closest('.match-target-selector .sel-btn');
+      if (!btn) return;
+      const meta = MATCH_MODE_META[state.selectedMatchMode];
+      if (!meta) return;
+      // 步长：定总杯模式 5 步，时间/局数/找菜比 1 步
+      const step = state.selectedMatchMode === 'totalLoss' ? 5 : 1;
+      let next = state.selectedMatchTarget + (btn.dataset.dir === 'up' ? step : -step);
+      if (next < meta.min) next = meta.min;
+      if (next > meta.max) next = meta.max;
+      state.selectedMatchTarget = next;
+      syncMatchTargetUI();
+    };
+  }
+
+  function syncMatchTargetUI() {
+    const mode = state.selectedMatchMode;
+    const meta = MATCH_MODE_META[mode];
+    if (!meta) return;
+    if (mode === 'free') {
+      if (targetWrap) targetWrap.style.display = 'none';
+    } else {
+      if (targetWrap) targetWrap.style.display = '';
+      if (labelEl) labelEl.textContent = meta.label;
+      // 防越界
+      if (state.selectedMatchTarget < meta.min || state.selectedMatchTarget > meta.max) {
+        state.selectedMatchTarget = meta.def;
+      }
+      if (valueEl) valueEl.textContent = String(state.selectedMatchTarget);
+      if (unitEl) unitEl.textContent = meta.unit;
+    }
+    if (detail) detail.textContent = meta.desc;
+  }
+}
+
 // 人数选择器
 document.getElementById('player-count-selector').addEventListener('click', (e) => {
   const btn = e.target.closest('.count-btn');
@@ -731,13 +855,18 @@ function handleCreateRoom() {
   state.maxPlayers = state.selectedMaxPlayers;
   hideAllModals();
 
+  const matchConfig = state.selectedMatchMode && state.selectedMatchMode !== 'free'
+    ? { mode: state.selectedMatchMode, target: state.selectedMatchTarget }
+    : null;
+
   const payload = {
     nickname,
     playerId: state.playerId,
     maxPlayers: state.maxPlayers,
     preset: state.selectedPreset,
     singleBehavior: state.selectedSingleBehavior,
-    skillMode: state.selectedSkillMode || 'none'
+    skillMode: state.selectedSkillMode || 'none',
+    matchConfig
   };
 
   console.log('[创建房间]', payload);
@@ -1054,6 +1183,9 @@ function showGamePage(data) {
 
   // 更新规则徽章
   updateRulesetBadge();
+
+  // v2.7.0：刷新赛制进度条
+  updateMatchProgressBar();
 
   // 渲染对手区域
   renderOpponentsArea();
@@ -2065,6 +2197,18 @@ function handleGameStateRestore(data) {
   // v2.6.4：恢复自己激活未生效的封口
   state.myPendingSilencer = !!(data.you && data.you.pendingSilencer);
 
+  // v2.7.0：恢复赛制状态
+  if (data.matchConfig) state.matchConfig = data.matchConfig;
+  if (data.matchProgress) {
+    state.matchProgress = data.matchProgress;
+    startMatchCountdownIfNeeded();
+  }
+  if (data.matchFinished) {
+    state.matchFinished = data.matchFinished;
+    showFinalRankingPage(data.matchFinished);
+    return; // 已结束 → 直接进入排名页，不再继续渲染游戏页
+  }
+
   if (data.phase === 'waiting') {
     showWaitingPage({ roomCode: data.roomCode, roomInfo: { maxPlayers: data.maxPlayers, players: data.playerOrder } });
   } else if (data.phase === 'bidding' || data.phase === 'challenging') {
@@ -2078,6 +2222,7 @@ function handleGameStateRestore(data) {
     updateScoreDisplay();
     updateSkillBar();  // v2.6.3：刷新技能栏
     document.getElementById('game-my-name').textContent = state.nickname;
+    updateMatchProgressBar(); // v2.7.0
 
     // 恢复叫数记录
     if (state.bids.length > 0) {
@@ -2107,6 +2252,165 @@ function handleGameStateRestore(data) {
       showSettlementPage({ type: 'reconnect', stats: data.stats, playerOrder: data.playerOrder });
     }
   }
+}
+
+// =============== v2.7.0：赛制 UI ===============
+
+/**
+ * 启动定时间倒计时（每秒刷新进度条）
+ */
+function startMatchCountdownIfNeeded() {
+  stopMatchCountdown();
+  const mp = state.matchProgress;
+  if (!mp || mp.mode !== 'time' || !mp.endsAt) return;
+  state.matchCountdownTimer = setInterval(() => {
+    if (!state.matchProgress || state.matchProgress.finished) {
+      stopMatchCountdown();
+      return;
+    }
+    updateMatchProgressBar();
+  }, 1000);
+}
+
+function stopMatchCountdown() {
+  if (state.matchCountdownTimer) {
+    clearInterval(state.matchCountdownTimer);
+    state.matchCountdownTimer = null;
+  }
+}
+
+/**
+ * 更新游戏页顶部的赛制进度条
+ */
+function updateMatchProgressBar() {
+  const bar = document.getElementById('match-progress-bar');
+  const iconEl = document.getElementById('mp-icon');
+  const textEl = document.getElementById('mp-text');
+  if (!bar || !iconEl || !textEl) return;
+
+  const cfg = state.matchConfig;
+  const mp = state.matchProgress;
+  if (!cfg || cfg.mode === 'free' || !mp) {
+    bar.style.display = 'none';
+    bar.classList.remove('urgent');
+    return;
+  }
+
+  bar.style.display = '';
+  bar.classList.remove('urgent');
+
+  switch (cfg.mode) {
+    case 'time': {
+      iconEl.textContent = '⏱';
+      if (mp.timeUpFlag) {
+        textEl.textContent = '时间已到，本局结束后公布排名';
+        bar.classList.add('urgent');
+      } else if (mp.endsAt) {
+        const left = Math.max(0, Math.ceil((mp.endsAt - Date.now()) / 1000));
+        const m = Math.floor(left / 60);
+        const s = left % 60;
+        textEl.textContent = `剩余 ${m}:${String(s).padStart(2, '0')} · 已打 ${mp.roundsPlayed || 0} 局`;
+        if (left <= 30) bar.classList.add('urgent');
+      } else {
+        textEl.textContent = `定时间 ${cfg.target} 分钟`;
+      }
+      break;
+    }
+    case 'rounds': {
+      iconEl.textContent = '🔢';
+      const cur = mp.roundsPlayed || 0;
+      textEl.textContent = `第 ${Math.min(cur + 1, cfg.target)} / ${cfg.target} 局`;
+      if (cfg.target - cur <= 1) bar.classList.add('urgent');
+      break;
+    }
+    case 'maxLoss': {
+      iconEl.textContent = '🎯';
+      const cur = mp.currentMax != null ? mp.currentMax : 0;
+      textEl.textContent = `最菜玩家 ${cur} / ${cfg.target} 杯`;
+      if (cur >= cfg.target * 0.8) bar.classList.add('urgent');
+      break;
+    }
+    case 'totalLoss': {
+      iconEl.textContent = '🍺';
+      const cur = mp.currentTotal != null ? mp.currentTotal : 0;
+      textEl.textContent = `总欠杯 ${cur} / ${cfg.target} 杯`;
+      if (cur >= cfg.target * 0.8) bar.classList.add('urgent');
+      break;
+    }
+  }
+}
+
+/**
+ * 显示最终排名页（赛制结束）
+ */
+function showFinalRankingPage(data) {
+  showPage('final-ranking');
+  stopMatchCountdown();
+
+  const reasonEl = document.getElementById('final-reason');
+  const metaEl = document.getElementById('final-meta');
+  const listEl = document.getElementById('final-ranking-list');
+  if (!listEl) return;
+
+  if (reasonEl) reasonEl.textContent = data.reasonText || '比赛结束';
+  if (metaEl) {
+    const rounds = data.roundsPlayed || 0;
+    const durMin = data.durationMs ? Math.max(1, Math.round(data.durationMs / 60000)) : 0;
+    metaEl.textContent = `🎲 共打 ${rounds} 局 · ⏱ 用时约 ${durMin} 分钟`;
+  }
+
+  const ranking = (data.ranking || []).slice();
+  const medalMap = { 1: '🥇', 2: '🥈', 3: '🥉' };
+  const lastRank = ranking.length > 0 ? Math.max(...ranking.map(r => r.rank)) : 0;
+
+  listEl.innerHTML = ranking.map(r => {
+    const isMe = r.playerId === state.playerId;
+    const medal = medalMap[r.rank] || `第${r.rank}名`;
+    let cls = `rank-row rank-${r.rank}`;
+    if (r.rank === lastRank && ranking.length > 1) cls += ' rank-last';
+    if (isMe) cls += ' is-me';
+    const winRate = (r.wins + r.losses) > 0
+      ? Math.round(r.wins / (r.wins + r.losses) * 100)
+      : 0;
+    return `
+      <div class="${cls}">
+        <div class="rank-medal">${medal}</div>
+        <div class="rank-info">
+          <div class="rank-name">${r.nickname}${isMe ? '（你）' : ''}${r.isBot ? ' 🤖' : ''}</div>
+          <div class="rank-stats">${r.wins}胜 ${r.losses}负 · 胜率 ${winRate}%</div>
+        </div>
+        <div class="rank-score">
+          <span class="rank-score-num">${r.totalScore}</span>
+          <span class="rank-score-unit">杯</span>
+        </div>
+      </div>
+    `;
+  }).join('') || '<div class="rank-empty">暂无战绩</div>';
+
+  if (window.Sound) {
+    // 自己拿名次给点反馈
+    const me = ranking.find(r => r.playerId === state.playerId);
+    if (me) {
+      if (me.rank === 1) { window.Sound.win && window.Sound.win(); window.Sound.cheer && window.Sound.cheer(); }
+      else if (me.rank === lastRank && ranking.length > 1) { window.Sound.lose && window.Sound.lose(); }
+    }
+  }
+}
+
+// 最终排名页"回到首页"
+const btnFinalBackHome = document.getElementById('btn-final-back-home');
+if (btnFinalBackHome) {
+  btnFinalBackHome.addEventListener('click', () => {
+    sendMsg('leave_room');
+    state.roomCode = '';
+    state.opponent = null;
+    state.playerOrder = [];
+    state.bids = [];
+    state.matchConfig = null;
+    state.matchProgress = null;
+    state.matchFinished = null;
+    showPage('home');
+  });
 }
 
 // =============== 工具函数 ===============
