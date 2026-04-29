@@ -2247,6 +2247,10 @@ function handleGameStateRestore(data) {
   // v2.7.0：恢复赛制状态
   if (data.matchConfig) state.matchConfig = data.matchConfig;
   if (data.matchProgress) {
+    // v2.7.2: 重连时用 remainingMs + 收到时刻 算本地 endsAt,避免客户端时钟偏差导致剩余时间错乱
+    if (data.matchProgress.mode === 'time' && data.matchProgress.remainingMs != null) {
+      data.matchProgress.endsAt = Date.now() + data.matchProgress.remainingMs;
+    }
     state.matchProgress = data.matchProgress;
     startMatchCountdownIfNeeded();
   }

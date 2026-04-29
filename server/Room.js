@@ -115,12 +115,16 @@ class Room {
       this.matchTimer = setTimeout(() => {
         this.matchState.timeUpFlag = true;
         // 时间到时正在游戏中：当前局结束后会在 _checkMatchEnd 触发结束
-        // 时间到时正在结算页：等用户看完结算再 finish（延迟 6 秒，匹配前端 toast 提示）
+        // 时间到时正在结算页：等用户看完结算再 finish（延迟 4 秒，匹配前端 toast 提示）
         // 时间到时正在等待/结束：直接结束（理论上不会，因为开局才启动定时器）
         if (this.phase === PHASE.SETTLING) {
+          // v2.7.2: 立即抢占 pendingFinish,阻止 4 秒延迟内机器人 play_again 凑齐触发 startGame
+          this.matchState.pendingFinish = true;
           this.broadcast('match_time_up', {
             message: '⏱ 比赛时间已到，即将公布最终排名'
           });
+          // v2.7.2: 同步广播一次 progress 让前端进度条立刻进入 pendingFinish 状态(置灰再来一局按钮)
+          this.broadcast('match_progress', this._getMatchProgress());
           setTimeout(() => this._finishMatch('time'), 4000);
         } else if (this.phase === PHASE.WAITING || this.phase === PHASE.FINISHED) {
           this._finishMatch('time');
@@ -161,6 +165,8 @@ class Room {
   _checkMatchEnd() {
     if (this.matchConfig.mode === 'free') return false;
     if (this.matchState.finished) return false;
+    // v2.7.2: pendingFinish 期间禁止重复 +1（防御异常 broadcastSettled 重入）
+    if (this.matchState.pendingFinish) return false;
 
     this.matchState.roundsPlayed += 1;
 
@@ -251,13 +257,17 @@ class Room {
     this.matchState.finalRanking = ranking;
     this.phase = PHASE.FINISHED;
 
+    // v2.7.2: 缓存真实的"结束时刻"和"比赛时长",避免后续重连时用 Date.now() 反算导致用时虚高
+    this.matchState.finishedAt = Date.now();
+    this.matchState.matchDurationMs = this.matchState.finishedAt - (this.matchState.startedAt || this.matchState.finishedAt);
+
     this.broadcast('match_finished', {
       matchConfig: this.matchConfig,
       reason,
       reasonText: this._getFinishReasonText(reason),
       ranking,
       roundsPlayed: this.matchState.roundsPlayed,
-      durationMs: Date.now() - (this.matchState.startedAt || Date.now())
+      durationMs: this.matchState.matchDurationMs
     });
 
     // v2.7.1: 5 分钟后自动清理房间(防止用户不点"回首页"导致房间泄露)
@@ -298,6 +308,8 @@ class Room {
       progress.endsAt = st.startedAt + cfg.target * 60 * 1000;
       progress.timeUpFlag = st.timeUpFlag;
       progress.serverNow = Date.now(); // v2.7.1: 让前端基于服务器时间算剩余,避免客户端时钟偏差
+      // v2.7.2: 同时给 remainingMs,前端用「Date.now() + remainingMs」算本地 endsAt(尤其重连场景)
+      progress.remainingMs = Math.max(0, progress.endsAt - Date.now());
     }
     // v2.7.1: 所有非 free 模式都带上 currentMax/currentTotal,方便前端混合显示
     progress.currentMax = Math.max(0, ...Object.values(this.stats).map(s => s.totalScore || 0));
@@ -1235,16 +1247,21 @@ class Room {
    *
    * 胜负判定规则：
    *   - 普通开（非劈骰阶段）：opener 与 lastBidder 对决
+   *       opener 主动开骰 = 赌"叫数不成立"
    *       叫数成立(true)  → opener 输（多开了）
    *       叫数不成立(false) → lastBidder 输（骗叫）
    *   - 劈骰后开（由 handleChallengeOpen 进入）：
-   *       整场劈骰就是 initiator ↔ target 两人博弈，反劈反复踢，
-   *       最终"开"的那方就是 openerPlayerId，对立面（challenge loser 另一方）固定为两人中的另一位。
-   *       判定逻辑：
-   *         - 叫数成立 → 开的人输（他以为叫数虚、但实际成立）→ loser=opener, winner=对立面
-   *         - 叫数不成立 → 开的人赢 → winner=opener, loser=对立面
-   *       ⚠️ 这里 "对立面" 不是 lastBidder（反劈偶数次后 opener 可能就是 lastBidder 本人），
-   *          而是 challenge.initiator / challenge.target 里除 opener 外的那个。
+   *       ⚠️ v2.7.2 修复重大 BUG：劈骰链中的"open"是被反劈到无路可走时的被动选择，
+   *           opener 的押注方向 ≠ 普通开骰里"opener 赌不成立"的语义！
+   *       劈骰本质是 initiator(劈方,赌"不成立") ↔ target(叫数方,赌"成立") 两人博弈，
+   *       反劈只是踢回赌注、提高倍数，**不改变两人各自押注的方向**。
+   *       因此最终判定与"谁 open"完全无关，只看叫数是否成立：
+   *         - 叫数成立(true)  → initiator(劈方)输，target(叫数方)赢
+   *         - 叫数不成立(false) → target(叫数方)输，initiator(劈方)赢
+   *       【BUG 现场举例】A 叫 4 个 5（target=A），B 劈（initiator=B），
+   *           A 反劈，B 再反劈（count=3 达上限）→ A 必须 open。
+   *           真值≥4 叫数成立 → 应该 B 输。但旧代码用 opener=A 推导成 A 输（错！）
+   *           v2.7.1 之前所有"偶数次反劈后 lastBidder open"的局都判反了。
    */
   resolveGame(openerPlayerId, resultType, multiplier) {
     const lastBid = this.currentGame.lastBid;
@@ -1267,19 +1284,15 @@ class Room {
     let winner, loser;
     const challenge = this.currentGame.challenge;
     if (challenge && resultType === 'open') {
-      // 劈骰后开骰 → 胜负在 initiator/target 之间
-      // opener 可能是 initiator 也可能是 target（取决于反劈奇偶次数）
-      const opponent = (openerPlayerId === challenge.initiator)
-        ? challenge.target
-        : challenge.initiator;
+      // v2.7.2: 劈骰后开骰 → 完全按 initiator/target 押注方向判定，不看 opener
       if (result.bidEstablished) {
-        // 叫数成立 → 开骰的人输（虚开）
-        loser = openerPlayerId;
-        winner = opponent;
+        // 叫数成立 → 劈方(initiator)输（他赌不成立但实际成立）
+        loser = challenge.initiator;
+        winner = challenge.target;
       } else {
-        // 叫数不成立 → 开骰的人赢
-        winner = openerPlayerId;
-        loser = opponent;
+        // 叫数不成立 → 叫数方(target)输（他叫数虚、被劈方逮到）
+        loser = challenge.target;
+        winner = challenge.initiator;
       }
     } else {
       // 普通开骰（非劈骰分支）：opener vs lastBidder
@@ -1698,7 +1711,8 @@ class Room {
         reasonText: this._getFinishReasonText(this.matchState.finishReason),
         ranking: this.matchState.finalRanking,
         roundsPlayed: this.matchState.roundsPlayed,
-        durationMs: Date.now() - (this.matchState.startedAt || Date.now())
+        // v2.7.2: 用缓存的真实比赛时长,而不是"重连时刻 - startedAt"(后者会越拖越虚高)
+        durationMs: this.matchState.matchDurationMs || (Date.now() - (this.matchState.startedAt || Date.now()))
       };
     }
 

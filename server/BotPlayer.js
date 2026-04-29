@@ -181,42 +181,70 @@ class BotPlayer {
 
   /**
    * 劈骰阶段决策（被劈后）
+   *
+   * v2.7.2：区分自己的角色（initiator=劈方 / target=叫数方），分别决策。
+   * 关键语义：
+   *   - target（叫数方）选 challenge_open = 押注"叫数成立"。credibility 高 → 押 open（赢面大）；
+   *     credibility 低 → 千万别 open（会输），应该 surrender 或 counter_challenge。
+   *   - initiator（劈方）选 challenge_open = 押注"叫数不成立"。credibility 低 → 押 open；
+   *     credibility 高 → 别 open，应该 surrender 或 counter_challenge。
    */
   decideChallenge(context) {
-    const { myDice, lastBid, totalDice, challenge, ruleSet, onesCalled } = context;
+    const { myDice, lastBid, totalDice, challenge, ruleSet, onesCalled, myPlayerId } = context;
 
     if (!challenge) return { action: 'challenge_open' };
 
     const credibility = this.assessBidCredibility(myDice, lastBid, totalDice, ruleSet, onesCalled);
 
+    // v2.7.2: 关键 —— 区分自己是劈方还是叫数方
+    // myWinProbIfOpen = 我现在选 open 的胜率
+    //   target（押"成立"）：credibility 高 → 胜率高
+    //   initiator（押"不成立"）：credibility 低 → 胜率高
+    const isInitiator = myPlayerId && myPlayerId === challenge.initiator;
+    const myWinProbIfOpen = isInitiator ? (1 - credibility) : credibility;
+
+    // 已达上限：只能 open 或 surrender
     if (challenge.count >= 3 || challenge.multiplier >= 8) {
-      if (credibility > 0.5) {
+      // 胜率太低就认输（×8 损失大）
+      if (myWinProbIfOpen < 0.35) {
         return { action: 'surrender' };
       }
       return { action: 'challenge_open' };
     }
 
-    if (credibility > 0.6) {
-      if (this.style === 0) {
-        return { action: 'surrender' };
-      }
-      if (Math.random() < 0.5) {
-        return { action: 'surrender' };
-      }
-      return { action: 'challenge_open' };
-    }
-
-    if (credibility < 0.3) {
-      if (this.style >= 1 && Math.random() < 0.4) {
+    // 胜率很高 → 直接 open 赢
+    if (myWinProbIfOpen > 0.7) {
+      // 偶尔 counter 加注（激进性格）
+      if (this.style >= 1 && Math.random() < 0.25) {
         return { action: 'counter_challenge' };
       }
       return { action: 'challenge_open' };
     }
 
-    const rand = Math.random();
-    if (rand < 0.3) return { action: 'counter_challenge' };
-    if (rand < 0.7) return { action: 'challenge_open' };
-    return { action: 'surrender' };
+    // 胜率中等偏上 → 多数 open，少数 counter 试探
+    if (myWinProbIfOpen > 0.55) {
+      if (this.style >= 1 && Math.random() < 0.35) {
+        return { action: 'counter_challenge' };
+      }
+      return { action: 'challenge_open' };
+    }
+
+    // 胜率中等 → counter 转嫁压力
+    if (myWinProbIfOpen > 0.4) {
+      const rand = Math.random();
+      if (rand < 0.45) return { action: 'counter_challenge' };
+      if (rand < 0.75) return { action: 'challenge_open' };
+      return { action: 'surrender' };
+    }
+
+    // 胜率较低 → 主要 surrender 减少损失，激进性格偶尔 counter 搏一把
+    if (this.style >= 2 && Math.random() < 0.3) {
+      return { action: 'counter_challenge' };
+    }
+    if (Math.random() < 0.65) {
+      return { action: 'surrender' };
+    }
+    return { action: 'challenge_open' };
   }
 
   /**
