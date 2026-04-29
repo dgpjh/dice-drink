@@ -415,6 +415,13 @@ wss.on('connection', (ws) => {
         const ruleSet = createRuleSet(presetId, singleBehavior);
         const roomCode = generateRoomCode();
         const room = new Room(roomCode, playerId, maxPlayers, ruleSet, skillMode, matchConfig);
+        // v2.7.1: 赛制结束 5 分钟后自动销毁房间(防止用户不点"回首页"导致房间泄露)
+        room._onFinishCleanup = () => {
+          if (rooms[roomCode]) {
+            console.log(`[Room] ${roomCode} 赛制结束 5 分钟,自动销毁`);
+            cleanupRoom(roomCode);
+          }
+        };
         rooms[roomCode] = room;
         room.addPlayer(playerId, nickname, ws);
         playerRooms[playerId] = roomCode;

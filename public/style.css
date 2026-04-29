@@ -1307,6 +1307,12 @@ html, body {
   z-index: 40;
 }
 
+/* v2.7.1: 赛制进度条出现时,弹幕容器整体下移避免被遮挡 */
+.game-container.has-match-bar .danmaku-container {
+  top: 36px;
+  height: 64px;
+}
+
 .danmaku-item {
   position: absolute;
   white-space: nowrap;
@@ -1857,6 +1863,20 @@ html, body {
   color: var(--primary-light);
   font-size: 12px;
   text-align: center;
+}
+
+/* v2.7.1: 等待页赛制模式徽章 */
+.match-mode-badge {
+  width: 100%;
+  max-width: 300px;
+  padding: 8px 12px;
+  background: rgba(255, 165, 0, 0.15);
+  border: 1px solid rgba(255, 165, 0, 0.45);
+  border-radius: 12px;
+  color: #ffa500;
+  font-size: 12px;
+  text-align: center;
+  font-weight: 600;
 }
 
 /* =============== v2.7.0 赛制模式选择器 =============== */

@@ -115,8 +115,14 @@ class Room {
       this.matchTimer = setTimeout(() => {
         this.matchState.timeUpFlag = true;
         // 时间到时正在游戏中：当前局结束后会在 _checkMatchEnd 触发结束
-        // 时间到时正在结算页/等待页：直接结束
-        if (this.phase === PHASE.SETTLING || this.phase === PHASE.WAITING) {
+        // 时间到时正在结算页：等用户看完结算再 finish（延迟 6 秒，匹配前端 toast 提示）
+        // 时间到时正在等待/结束：直接结束（理论上不会，因为开局才启动定时器）
+        if (this.phase === PHASE.SETTLING) {
+          this.broadcast('match_time_up', {
+            message: '⏱ 比赛时间已到，即将公布最终排名'
+          });
+          setTimeout(() => this._finishMatch('time'), 4000);
+        } else if (this.phase === PHASE.WAITING || this.phase === PHASE.FINISHED) {
           this._finishMatch('time');
         } else {
           // 通知前端"时间已到，本局结束后整场结束"
@@ -126,16 +132,25 @@ class Room {
         }
       }, ms);
 
-      // 同步广播开始时间，前端做倒计时
+      // v2.7.1: 同步广播开始时间 + 持续时间(用 durationMs 让前端基于"收到时间"算剩余,避免客户端时钟偏差)
       this.broadcast('match_started', {
         matchConfig: this.matchConfig,
         startedAt: this.matchState.startedAt,
-        endsAt: this.matchState.startedAt + ms
+        endsAt: this.matchState.startedAt + ms,
+        durationMs: ms,
+        // v2.7.1: 初始进度,前端进度条立即可显示
+        currentMax: 0,
+        currentTotal: 0,
+        roundsPlayed: 0
       });
     } else {
       this.broadcast('match_started', {
         matchConfig: this.matchConfig,
-        startedAt: this.matchState.startedAt
+        startedAt: this.matchState.startedAt,
+        // v2.7.1: 初始进度
+        currentMax: 0,
+        currentTotal: 0,
+        roundsPlayed: 0
       });
     }
   }
@@ -187,6 +202,8 @@ class Room {
     this.broadcast('match_progress', this._getMatchProgress());
 
     if (shouldEnd) {
+      // v2.7.1: 立即抢占,阻止机器人 play_again 在 1.5s 间隙内触发 startGame
+      this.matchState.pendingFinish = true;
       // 延迟一点点让结算页先展示
       setTimeout(() => this._finishMatch(reason), 1500);
     }
@@ -242,6 +259,14 @@ class Room {
       roundsPlayed: this.matchState.roundsPlayed,
       durationMs: Date.now() - (this.matchState.startedAt || Date.now())
     });
+
+    // v2.7.1: 5 分钟后自动清理房间(防止用户不点"回首页"导致房间泄露)
+    // 重连时若房间还在,可以再看到 finalRanking;5 分钟后只能新建房间
+    if (typeof this._onFinishCleanup === 'function') {
+      setTimeout(() => {
+        try { this._onFinishCleanup(); } catch (e) {}
+      }, 5 * 60 * 1000);
+    }
   }
 
   _getFinishReasonText(reason) {
@@ -265,17 +290,18 @@ class Room {
       target: cfg.target,
       label: cfg.label,
       roundsPlayed: st.roundsPlayed,
-      finished: st.finished
+      finished: st.finished,
+      pendingFinish: !!st.pendingFinish  // v2.7.1: 即将结束(1.5s 缓冲期)
     };
     if (cfg.mode === 'time' && st.startedAt) {
       progress.startedAt = st.startedAt;
       progress.endsAt = st.startedAt + cfg.target * 60 * 1000;
       progress.timeUpFlag = st.timeUpFlag;
-    } else if (cfg.mode === 'maxLoss') {
-      progress.currentMax = Math.max(0, ...Object.values(this.stats).map(s => s.totalScore || 0));
-    } else if (cfg.mode === 'totalLoss') {
-      progress.currentTotal = Object.values(this.stats).reduce((sum, s) => sum + (s.totalScore || 0), 0);
+      progress.serverNow = Date.now(); // v2.7.1: 让前端基于服务器时间算剩余,避免客户端时钟偏差
     }
+    // v2.7.1: 所有非 free 模式都带上 currentMax/currentTotal,方便前端混合显示
+    progress.currentMax = Math.max(0, ...Object.values(this.stats).map(s => s.totalScore || 0));
+    progress.currentTotal = Object.values(this.stats).reduce((sum, s) => sum + (s.totalScore || 0), 0);
     return progress;
   }
 
@@ -495,6 +521,8 @@ class Room {
 
     // v2.7.0：整场已结束，禁止再开新局
     if (this.matchState.finished) return;
+    // v2.7.1：抢占式守卫——_checkMatchEnd 已判定即将结束,1.5s 缓冲期内禁止开新局
+    if (this.matchState.pendingFinish) return;
 
     // 自选模式下，所有玩家都必须已选技能才能开局
     if (this.skillMode === 'choose' && !this.allHumansChoseSkill()) {
@@ -1341,6 +1369,14 @@ class Room {
     if (this.phase !== PHASE.SETTLING) return;
     // v2.7.0：整场比赛已结束，不能再来一局
     if (this.matchState.finished) return;
+    // v2.7.1：即将结束(1.5s 缓冲期),通知前端"等待最终排名"而不是静默忽略
+    if (this.matchState.pendingFinish) {
+      this.sendTo(playerId, 'play_again_blocked', {
+        reason: 'matchEnding',
+        message: '🏁 本局已是最后一局，正在结算最终排名...'
+      });
+      return;
+    }
     if (!this.players[playerId]) return;
     if (!this.currentGame._playAgain) {
       this.currentGame._playAgain = new Set();

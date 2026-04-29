@@ -419,6 +419,19 @@ function handleMessage(msg) {
       playAgainBtn.classList.add('btn-glow');
       break;
 
+    // v2.7.1: 服务端拒绝再来一局(整场即将结束)的反馈
+    case 'play_again_blocked': {
+      const btn = document.getElementById('btn-play-again');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '🏁 等待最终排名...';
+        btn.classList.remove('btn-glow');
+      }
+      state.playAgainClicked = false;
+      showToast(data.message || '本局已是最后一局', 'success');
+      break;
+    }
+
     case 'opponent_disconnected':
       showToast(data.message, 'error');
       break;
@@ -485,14 +498,21 @@ function handleMessage(msg) {
     // ============== v2.7.0：赛制系统 ==============
     case 'match_started':
       if (data.matchConfig) state.matchConfig = data.matchConfig;
+      // v2.7.1: 用 durationMs + 收到时刻 算 endsAt,避免客户端时钟偏差导致倒计时不准
+      const localEndsAt = data.durationMs ? (Date.now() + data.durationMs) : data.endsAt;
       state.matchProgress = {
         mode: data.matchConfig?.mode,
         target: data.matchConfig?.target,
         label: data.matchConfig?.label,
         startedAt: data.startedAt,
-        endsAt: data.endsAt,
-        roundsPlayed: 0,
-        finished: false
+        endsAt: localEndsAt,
+        durationMs: data.durationMs,
+        roundsPlayed: data.roundsPlayed || 0,
+        currentMax: data.currentMax || 0,
+        currentTotal: data.currentTotal || 0,
+        finished: false,
+        pendingFinish: false,
+        timeUpFlag: false
       };
       startMatchCountdownIfNeeded();
       updateMatchProgressBar();
@@ -502,8 +522,21 @@ function handleMessage(msg) {
       break;
 
     case 'match_progress':
+      // v2.7.1: 服务端的 endsAt 用 startedAt 算可能偏离,优先沿用本地之前算好的 endsAt
+      if (state.matchProgress && state.matchProgress.endsAt && data.mode === 'time') {
+        data.endsAt = state.matchProgress.endsAt;
+      }
       state.matchProgress = data;
       updateMatchProgressBar();
+      // v2.7.1: 如果整场即将结束,提前禁用"再来一局"按钮(防止用户点了空响应)
+      if (data.pendingFinish) {
+        const btn = document.getElementById('btn-play-again');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = '🏁 等待最终排名...';
+          btn.classList.remove('btn-glow');
+        }
+      }
       break;
 
     case 'match_time_up':
@@ -976,6 +1009,7 @@ function updateWaitingPlayerList() {
 
   updateAddBotButton();
   updateSkillModeBadge();
+  updateMatchModeBadge(); // v2.7.1: 等待页展示赛制徽章
 }
 
 // 显示"随机/自选"技能模式徽章
@@ -991,6 +1025,19 @@ function updateSkillModeBadge() {
     choose: '🎭 技能模式：自选技能'
   };
   badge.textContent = textMap[state.skillMode] || '';
+  badge.style.display = 'block';
+}
+
+// v2.7.1: 等待页展示赛制徽章
+function updateMatchModeBadge() {
+  const badge = document.getElementById('match-mode-badge');
+  if (!badge) return;
+  const cfg = state.matchConfig;
+  if (!cfg || cfg.mode === 'free' || !cfg.label) {
+    badge.style.display = 'none';
+    return;
+  }
+  badge.textContent = `🏁 赛制：${cfg.label}`;
   badge.style.display = 'block';
 }
 
@@ -2288,16 +2335,21 @@ function updateMatchProgressBar() {
   const textEl = document.getElementById('mp-text');
   if (!bar || !iconEl || !textEl) return;
 
+  // v2.7.1: 切换 .has-match-bar 类,联动弹幕容器下移避免遮挡
+  const gameContainer = document.querySelector('#page-game .game-container');
+
   const cfg = state.matchConfig;
   const mp = state.matchProgress;
   if (!cfg || cfg.mode === 'free' || !mp) {
     bar.style.display = 'none';
     bar.classList.remove('urgent');
+    if (gameContainer) gameContainer.classList.remove('has-match-bar');
     return;
   }
 
   bar.style.display = '';
   bar.classList.remove('urgent');
+  if (gameContainer) gameContainer.classList.add('has-match-bar');
 
   switch (cfg.mode) {
     case 'time': {
@@ -2319,8 +2371,14 @@ function updateMatchProgressBar() {
     case 'rounds': {
       iconEl.textContent = '🔢';
       const cur = mp.roundsPlayed || 0;
-      textEl.textContent = `第 ${Math.min(cur + 1, cfg.target)} / ${cfg.target} 局`;
-      if (cfg.target - cur <= 1) bar.classList.add('urgent');
+      // v2.7.1: 比赛即将结束(已打=target)时显示"最后一局"提示,不再误导成"第N+1局"
+      if (mp.pendingFinish || cur >= cfg.target) {
+        textEl.textContent = `已完成 ${cfg.target} / ${cfg.target} 局`;
+        bar.classList.add('urgent');
+      } else {
+        textEl.textContent = `第 ${cur + 1} / ${cfg.target} 局`;
+        if (cfg.target - cur <= 1) bar.classList.add('urgent');
+      }
       break;
     }
     case 'maxLoss': {
@@ -2352,11 +2410,30 @@ function showFinalRankingPage(data) {
   const listEl = document.getElementById('final-ranking-list');
   if (!listEl) return;
 
-  if (reasonEl) reasonEl.textContent = data.reasonText || '比赛结束';
+  // v2.7.1: 结束原因加图标
+  const reasonIconMap = {
+    time: '⏱',
+    rounds: '🔢',
+    maxLoss: '🎯',
+    totalLoss: '🍺'
+  };
+  const reasonIcon = reasonIconMap[data.reason] || '🏁';
+  if (reasonEl) reasonEl.textContent = `${reasonIcon} ${data.reasonText || '比赛结束'}`;
+
   if (metaEl) {
     const rounds = data.roundsPlayed || 0;
-    const durMin = data.durationMs ? Math.max(1, Math.round(data.durationMs / 60000)) : 0;
-    metaEl.textContent = `🎲 共打 ${rounds} 局 · ⏱ 用时约 ${durMin} 分钟`;
+    // v2.7.1: 用时精确到秒(短时间不再四舍五入到 1 分钟)
+    const durMs = data.durationMs || 0;
+    let durText;
+    if (durMs < 60000) {
+      durText = `${Math.max(1, Math.round(durMs / 1000))} 秒`;
+    } else {
+      const totalSec = Math.round(durMs / 1000);
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      durText = s > 0 ? `${m} 分 ${s} 秒` : `${m} 分钟`;
+    }
+    metaEl.textContent = `🎲 共打 ${rounds} 局 · ⏱ 用时 ${durText}`;
   }
 
   const ranking = (data.ranking || []).slice();
